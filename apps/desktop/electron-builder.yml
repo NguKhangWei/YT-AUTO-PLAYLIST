@@ -1,0 +1,36 @@
+# Windows installer for auto-yt. Build with `npm run build:win` (from the repo root).
+# The Google OAuth client from the repo-root .env is built into the app, so build
+# with your own .env.
+appId: com.auto-yt.app # also the notification sender id (see app.setAppUserModelId)
+productName: auto-yt
+copyright: Copyright © 2026 Ngu Khang Wei
+
+directories:
+  buildResources: resources
+  output: release/${version}
+
+# Only the bundled app and its icons; everything else is compiled into out/.
+files:
+  - out/**
+  - resources/**
+  - package.json
+asarUnpack:
+  - resources/**
+npmRebuild: false # no native modules (SQLite is built into Electron's Node)
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.png
+  artifactName: auto-yt-setup-${version}.${ext}
+
+nsis:
+  oneClick: true # per-user install, no admin prompt
+  perMachine: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: auto-yt
+  # Keep sign-in, schedulers and history when uninstalling or upgrading.
+  deleteAppDataOnUninstall: false

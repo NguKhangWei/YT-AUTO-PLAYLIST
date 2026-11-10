@@ -18,7 +18,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
+    "build:win": "npm run build:win -w @auto-yt/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

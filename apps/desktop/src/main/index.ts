@@ -12,8 +12,9 @@ import {
   shell,
   Tray,
 } from 'electron'
-import appIconPath from '../../resources/icon.png?asset'
-import trayIconPath from '../../resources/tray.png?asset'
+// asarUnpack: Windows toasts and the tray need real files, not paths inside app.asar.
+import appIconPath from '../../resources/icon.png?asset&asarUnpack'
+import trayIconPath from '../../resources/tray.png?asset&asarUnpack'
 import { IPC } from '../shared/ipc'
 import { createGoogleAuth } from './auth/google-auth'
 import { createEncryptedFileStore } from './auth/token-store'
@@ -21,6 +22,7 @@ import { createChannelService } from './channels'
 import { openDatabase } from './db/database'
 import { createSqliteStorage } from './db/sqlite-storage'
 import { registerIpc } from './ipc'
+import { migrateLegacyData } from './legacy-data'
 import type { NotificationText } from './notifications'
 import { createQuotaTracker } from './quota'
 import { createRunner } from './runner'
@@ -99,6 +101,11 @@ function showWindow(): void {
 
 function main(): void {
   const userData = app.getPath('userData')
+  // Builds before M10 kept data under "@auto-yt/desktop"; bring it over once.
+  if (!app.commandLine.hasSwitch('user-data-dir')) {
+    const copied = migrateLegacyData(join(app.getPath('appData'), '@auto-yt', 'desktop'), userData)
+    if (copied.length > 0) console.log(`Moved ${copied.join(', ')} to ${userData}`)
+  }
   const now = () => new Date()
   const send = (channel: string, ...args: unknown[]) =>
     BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(channel, ...args))
