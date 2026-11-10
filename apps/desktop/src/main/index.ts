@@ -23,7 +23,6 @@ import { createYouTubeClient, isShortVideo } from './core/youtube/client'
 import { openDatabase } from './db/database'
 import { createSqliteStorage } from './db/sqlite-storage'
 import { registerIpc } from './ipc'
-import { migrateLegacyData } from './legacy-data'
 import type { NotificationText } from './notifications'
 import { createRunner } from './runner'
 import { createSchedulerLoop } from './scheduler-loop'
@@ -43,9 +42,6 @@ if (!app.requestSingleInstanceLock()) {
 
 function main(): void {
   const userData = app.getPath('userData')
-  if (!app.commandLine.hasSwitch('user-data-dir')) {
-    migrateLegacyData(join(app.getPath('appData'), '@auto-yt', 'desktop'), userData)
-  }
   const now = () => new Date()
   const send = (channel: string, value?: unknown) =>
     BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(channel, value))
