@@ -5,6 +5,8 @@ import { IPC } from '../shared/ipc'
 import type { GoogleAuth } from './auth/google-auth'
 import type { ChannelService } from './channels'
 import type { QuotaTracker } from './quota'
+import type { Runner } from './runner'
+import type { SqliteStorage } from './db/sqlite-storage'
 import type { SchedulerService } from './schedulers'
 
 export function toErrorInfo(e: unknown): ApiErrorInfo {
@@ -54,9 +56,14 @@ export function registerIpc(deps: {
   schedulers: SchedulerService
   channels: ChannelService
   quota: QuotaTracker
+  runner: Runner
+  storage: SqliteStorage
+  /** Registers development-only handlers (debug lookback). */
+  isDev: boolean
+  now: () => Date
   getWindows: () => BrowserWindow[]
 }): void {
-  const { ipcMain, auth, youtube, schedulers, channels, quota } = deps
+  const { ipcMain, auth, youtube, schedulers, channels, quota, runner, storage } = deps
 
   ipcMain.handle(IPC.authGetStatus, wrap(auth.status))
   ipcMain.handle(IPC.authSignIn, wrap(auth.signIn))
@@ -92,6 +99,28 @@ export function registerIpc(deps: {
   ipcMain.handle(
     IPC.schedulersRemove,
     wrap((id: string) => schedulers.remove(id)),
+  )
+
+  ipcMain.handle(
+    IPC.schedulersRunNow,
+    wrap((id: string) => runner.run(String(id), 'manual')),
+  )
+  ipcMain.handle(
+    IPC.runsList,
+    wrap((opts?: { schedulerId?: string; limit?: number }) =>
+      storage.listRuns({
+        schedulerId: typeof opts?.schedulerId === 'string' ? opts.schedulerId : undefined,
+        limit: Math.min(500, Math.max(1, Number(opts?.limit) || 100)),
+      }),
+    ),
+  )
+  ipcMain.handle(
+    IPC.debugLookback,
+    wrap((id: string, days: number) => {
+      if (!deps.isDev) throw new Error('Debug lookback is only available in development.')
+      const d = Math.min(30, Math.max(1, Math.floor(Number(days) || 7)))
+      storage.debugLookback(String(id), new Date(deps.now().getTime() - d * 86_400_000))
+    }),
   )
 
   auth.onStatusChange((status: AuthStatus) => {

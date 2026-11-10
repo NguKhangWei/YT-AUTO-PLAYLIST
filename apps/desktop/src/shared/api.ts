@@ -46,6 +46,40 @@ export interface SchedulerView extends SchedulerInput {
   createdAt: string
   lastSuccessAt?: string
   nextRunAt: string
+  /** The most recent scan (status "running" while one is in progress). */
+  lastRun?: RunView
+}
+
+export type RunStatus = 'running' | 'ok' | 'partial' | 'error'
+
+/** Why a video wasn't added (see core `ScanSkipReason`). */
+export type RunSkipReason =
+  'short' | 'livestream' | 'live' | 'upcoming' | 'inPlaylist' | 'unavailable'
+
+export interface RunDetails {
+  /** Added to the playlist, oldest first. */
+  added: { id: string; title: string; publishedAt: string }[]
+  skipped: { videoId: string; title?: string; reason: RunSkipReason }[]
+  /** Tracked channels whose uploads couldn't be read (deleted/terminated). */
+  unavailableChannels: { id: string; title: string }[]
+  /** The local quota estimate was too low for all inserts. */
+  quotaWarning: boolean
+  /** The scheduler was turned off (its playlist is gone). */
+  deactivated: boolean
+}
+
+/** One scan of one scheduler. */
+export interface RunView {
+  id: string
+  schedulerId: string
+  schedulerName: string
+  trigger: 'manual' | 'scheduled'
+  status: RunStatus
+  startedAt: string
+  finishedAt?: string
+  addedCount: number
+  error?: { kind: string; message: string }
+  details?: RunDetails
 }
 
 /** The signed-in Google account, for the header. */
@@ -106,6 +140,21 @@ export interface Api {
     update(id: string, input: SchedulerInput): Promise<SchedulerView>
     setActive(id: string, active: boolean): Promise<SchedulerView>
     remove(id: string): Promise<void>
+    /** Scan now (queued behind any running scan); resolves with the finished run. */
+    runNow(id: string): Promise<RunView>
+  }
+  runs: {
+    /** Newest first. */
+    list(opts?: { schedulerId?: string; limit?: number }): Promise<RunView[]>
+    /** Pushed by main when a scan starts or finishes. Returns unsubscribe. */
+    onChange(listener: () => void): () => void
+  }
+  debug: {
+    /**
+     * Development builds only: treat uploads from the last `days` days as new
+     * for this scheduler, so "Run now" has something to add.
+     */
+    lookback(id: string, days: number): Promise<void>
   }
 }
 
@@ -124,4 +173,6 @@ export interface Bridge {
   channels: Enveloped<Api['channels']>
   quota: Enveloped<Api['quota']>
   schedulers: Enveloped<Api['schedulers']>
+  runs: Enveloped<Api['runs']>
+  debug: Enveloped<Api['debug']>
 }

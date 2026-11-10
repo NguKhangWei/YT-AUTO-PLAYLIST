@@ -46,6 +46,18 @@ const bridge: Bridge = {
     update: invoke(IPC.schedulersUpdate),
     setActive: invoke(IPC.schedulersSetActive),
     remove: invoke(IPC.schedulersRemove),
+    runNow: invoke(IPC.schedulersRunNow),
+  },
+  runs: {
+    list: invoke(IPC.runsList),
+    onChange(listener) {
+      const handler = () => listener()
+      ipcRenderer.on(IPC.runsChanged, handler)
+      return () => ipcRenderer.removeListener(IPC.runsChanged, handler)
+    },
+  },
+  debug: {
+    lookback: invoke(IPC.debugLookback),
   },
 }
 

@@ -1,7 +1,5 @@
 @import 'tailwindcss';
 
-@custom-variant dark (&:is(.dark *));
-
 /* shadcn/ui "neutral" theme tokens */
 :root {
   /* Tells Chromium which palette to use for native UI it draws itself: <select>

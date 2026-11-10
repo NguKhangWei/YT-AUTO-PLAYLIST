@@ -28,7 +28,7 @@ describe('App routing', () => {
     renderWithApi(api)
     fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }))
     expect(api.auth.signIn).toHaveBeenCalledOnce()
-    expect(await screen.findByRole('heading', { name: 'Schedulers' })).toBeTruthy()
+    expect(await screen.findByRole('tab', { name: 'Schedulers' })).toBeTruthy()
     expect(screen.getByText('Khang Wei')).toBeTruthy()
     expect(await screen.findByText(/No schedulers yet/)).toBeTruthy()
   })
@@ -60,7 +60,7 @@ describe('App routing', () => {
   it('returns to sign-in when main reports the session ended (revoked token)', async () => {
     const { api, emit } = fakeApi(signedIn)
     renderWithApi(api)
-    await screen.findByRole('heading', { name: 'Schedulers' })
+    await screen.findByRole('tab', { name: 'Schedulers' })
     act(() => emit(signedOut))
     expect(await screen.findByRole('button', { name: 'Sign in with Google' })).toBeTruthy()
   })

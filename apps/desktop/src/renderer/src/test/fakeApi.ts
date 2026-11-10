@@ -6,6 +6,7 @@ import type {
   ChannelSearchResult,
   Playlist,
   QuotaStatus,
+  RunView,
   SchedulerInput,
   SchedulerView,
 } from '../../../shared/api'
@@ -34,6 +35,28 @@ export const view = (over: Partial<SchedulerView> = {}): SchedulerView => ({
   ...over,
 })
 
+export const run = (over: Partial<RunView> = {}): RunView => ({
+  id: 'r1',
+  schedulerId: 's1',
+  schedulerName: 'Gaming',
+  trigger: 'manual',
+  status: 'ok',
+  startedAt: '2026-11-10T02:00:00.000Z',
+  finishedAt: '2026-11-10T02:00:05.000Z',
+  addedCount: 2,
+  details: {
+    added: [
+      { id: 'v1', title: 'First video', publishedAt: '2026-11-09T10:00:00.000Z' },
+      { id: 'v2', title: 'Second video', publishedAt: '2026-11-09T12:00:00.000Z' },
+    ],
+    skipped: [{ videoId: 'v3', title: 'A short', reason: 'short' }],
+    unavailableChannels: [],
+    quotaWarning: false,
+    deactivated: false,
+  },
+  ...over,
+})
+
 /** A channel as search returns it. */
 export const channel = (n: number, over: Partial<Channel> = {}): Channel => ({
   id: `UC${String(n).padStart(22, '0')}`,
@@ -56,9 +79,14 @@ export function fakeApi(
     schedulers?: SchedulerView[]
     search?: (query: string) => ChannelSearchResult
     quota?: QuotaStatus
+    runs?: RunView[]
+    /** What "Run now" resolves with (default: a successful run adding 2 videos). */
+    runResult?: (schedulerId: string) => RunView
   } = {},
 ) {
   const listeners = new Set<(s: AuthStatus) => void>()
+  const runListeners = new Set<() => void>()
+  let runs = [...(opts.runs ?? [])]
   const quotaListeners = new Set<(s: QuotaStatus) => void>()
   let schedulers = [...(opts.schedulers ?? [])]
   let nextId = 100
@@ -122,11 +150,32 @@ export function fakeApi(
       remove: vi.fn(async (id: string) => {
         schedulers = schedulers.filter((x) => x.id !== id)
       }),
+      runNow: vi.fn(async (id: string) => {
+        const name = schedulers.find((x) => x.id === id)?.name ?? '?'
+        const r =
+          opts.runResult?.(id) ?? run({ id: `r${nextId++}`, schedulerId: id, schedulerName: name })
+        runs = [r, ...runs]
+        schedulers = schedulers.map((x) => (x.id === id ? { ...x, lastRun: r } : x))
+        return r
+      }),
+    },
+    runs: {
+      list: vi.fn(async (o?: { schedulerId?: string }) =>
+        runs.filter((r) => !o?.schedulerId || r.schedulerId === o.schedulerId),
+      ),
+      onChange: vi.fn((l: () => void) => {
+        runListeners.add(l)
+        return () => runListeners.delete(l)
+      }),
+    },
+    debug: {
+      lookback: vi.fn(async () => undefined),
     },
   } satisfies Api
   return {
     api,
     emit: (s: AuthStatus) => listeners.forEach((l) => l(s)),
     emitQuota: (q: QuotaStatus) => quotaListeners.forEach((l) => l(q)),
+    emitRuns: () => runListeners.forEach((l) => l()),
   }
 }

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
-import { createYouTubeClient } from '@auto-yt/core'
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron'
+import { createYouTubeClient, isShortVideo } from '@auto-yt/core'
+import { app, BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron'
 import { IPC } from '../shared/ipc'
 import { createGoogleAuth } from './auth/google-auth'
 import { createEncryptedFileStore } from './auth/token-store'
@@ -9,6 +9,7 @@ import { createSqliteStorage } from './db/sqlite-storage'
 import { createChannelService } from './channels'
 import { registerIpc } from './ipc'
 import { createQuotaTracker } from './quota'
+import { createRunner } from './runner'
 import { createSchedulerService } from './schedulers'
 
 function createWindow(): void {
@@ -44,6 +45,17 @@ function createWindow(): void {
   }
 }
 
+// Windows shows this as the notification sender (instead of "electron.app.Electron").
+app.setAppUserModelId('com.auto-yt.app')
+
+function focusWindow(): void {
+  const [win] = BrowserWindow.getAllWindows()
+  if (!win) return createWindow()
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
 void app.whenReady().then(() => {
   const auth = createGoogleAuth({
     clientId: import.meta.env.MAIN_VITE_GOOGLE_CLIENT_ID,
@@ -66,7 +78,35 @@ void app.whenReady().then(() => {
   })
   const schedulers = createSchedulerService({ storage, now })
   const channels = createChannelService({ storage, youtube, now })
-  registerIpc({ ipcMain, auth, youtube, schedulers, channels, quota, getWindows })
+  storage.markInterruptedRuns(now())
+  const runner = createRunner({
+    storage,
+    youtube,
+    isShort: (id) => isShortVideo(id),
+    quotaRemaining: quota.remaining,
+    now,
+    notify: ({ title, body }) => {
+      if (!Notification.isSupported()) return
+      const n = new Notification({ title, body })
+      n.on('click', focusWindow)
+      n.show()
+    },
+    onChange: () => getWindows().forEach((w) => w.webContents.send(IPC.runsChanged)),
+    log: (message, error) => console.error(message, error),
+  })
+  registerIpc({
+    ipcMain,
+    auth,
+    youtube,
+    schedulers,
+    channels,
+    quota,
+    runner,
+    storage,
+    isDev: !app.isPackaged,
+    now,
+    getWindows,
+  })
 
   createWindow()
   app.on('activate', () => {

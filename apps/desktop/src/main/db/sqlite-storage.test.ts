@@ -145,3 +145,88 @@ describe('upgrading an existing database', () => {
     expect(s.quotaUnitsUsed('2026-11-10')).toBe(0) // v2 tables exist
   })
 })
+
+describe('run history', () => {
+  const setup = () => {
+    const s = createSqliteStorage(openDatabase(':memory:'))
+    s.insertScheduler(contractScheduler('a', { playlistId: 'PL-a', name: 'A' }))
+    s.insertScheduler(contractScheduler('b', { playlistId: 'PL-b', name: 'B' }))
+    return s
+  }
+
+  it('records a run from start to finish, newest first, with the scheduler name', () => {
+    const s = setup()
+    s.startRun({ id: 'r1', schedulerId: 'a', trigger: 'manual', startedAt: new Date(1000) })
+    expect(s.listRuns()[0]).toEqual({
+      id: 'r1',
+      schedulerId: 'a',
+      schedulerName: 'A',
+      trigger: 'manual',
+      status: 'running',
+      startedAt: new Date(1000).toISOString(),
+      addedCount: 0,
+    })
+    const details = {
+      added: [{ id: 'v', title: 'T', publishedAt: new Date(0).toISOString() }],
+      skipped: [],
+      unavailableChannels: [],
+      quotaWarning: false,
+      deactivated: false,
+    }
+    s.finishRun('r1', {
+      status: 'partial',
+      finishedAt: new Date(2000),
+      addedCount: 1,
+      error: { kind: 'quotaExceeded', message: 'q' },
+      details,
+    })
+    s.startRun({ id: 'r2', schedulerId: 'b', trigger: 'scheduled', startedAt: new Date(3000) })
+
+    expect(s.listRuns().map((r) => r.id)).toEqual(['r2', 'r1'])
+    expect(s.listRuns({ schedulerId: 'a' })).toEqual([
+      expect.objectContaining({
+        status: 'partial',
+        finishedAt: new Date(2000).toISOString(),
+        addedCount: 1,
+        error: { kind: 'quotaExceeded', message: 'q' },
+        details,
+      }),
+    ])
+    expect(s.listRuns({ limit: 1 })).toHaveLength(1)
+  })
+
+  it('marks runs left running by a crash as interrupted', () => {
+    const s = setup()
+    s.startRun({ id: 'r1', schedulerId: 'a', trigger: 'manual', startedAt: new Date(1000) })
+    s.markInterruptedRuns(new Date(5000))
+    expect(s.listRuns()[0]).toMatchObject({ status: 'error', error: { kind: 'interrupted' } })
+  })
+
+  it('keeps only the newest 500 runs', () => {
+    const s = setup()
+    for (let i = 0; i < 502; i++) {
+      s.startRun({ id: `r${i}`, schedulerId: 'a', trigger: 'manual', startedAt: new Date(i) })
+    }
+    s.finishRun('r501', { status: 'ok', finishedAt: new Date(600), addedCount: 0 })
+    const runs = s.listRuns({ limit: 1000 })
+    expect(runs).toHaveLength(500)
+    expect(runs.at(-1)?.id).toBe('r2')
+  })
+
+  it('deletes a scheduler’s runs with it', () => {
+    const s = setup()
+    s.startRun({ id: 'r1', schedulerId: 'a', trigger: 'manual', startedAt: new Date(1000) })
+    s.deleteScheduler('a')
+    expect(s.listRuns()).toEqual([])
+  })
+
+  it('debug lookback moves every channel start back and clears the last success', async () => {
+    const s = setup()
+    const t = contractChannel('UC1', new Date('2026-11-10T00:00:00Z'))
+    s.trackChannel('a', t.channel, t.sinceAt)
+    await s.setLastSuccessAt('a', new Date('2026-11-10T01:00:00Z'))
+    s.debugLookback('a', new Date('2026-11-03T00:00:00Z'))
+    expect((await s.listTrackedChannels('a'))[0]?.sinceAt).toEqual(new Date('2026-11-03T00:00:00Z'))
+    expect((await s.getScheduler('a'))?.lastSuccessAt).toBeUndefined()
+  })
+})

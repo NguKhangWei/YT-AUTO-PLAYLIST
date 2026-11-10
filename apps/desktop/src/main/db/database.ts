@@ -60,6 +60,25 @@ export const MIGRATIONS: string[] = [
     units   INTEGER NOT NULL
   ) STRICT;
   `,
+  // 3: scan history
+  `
+  CREATE TABLE runs (
+    id            TEXT PRIMARY KEY,
+    scheduler_id  TEXT NOT NULL REFERENCES schedulers (id) ON DELETE CASCADE,
+    trigger       TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
+    status        TEXT NOT NULL CHECK (status IN ('running', 'ok', 'partial', 'error')),
+    started_at    INTEGER NOT NULL,
+    finished_at   INTEGER,
+    added_count   INTEGER NOT NULL DEFAULT 0,
+    error_kind    TEXT,
+    error_message TEXT,
+    -- Added videos, skipped videos, unavailable channels, quota warning (JSON).
+    details_json  TEXT
+  ) STRICT;
+
+  CREATE INDEX runs_by_scheduler ON runs (scheduler_id, started_at DESC);
+  CREATE INDEX runs_by_time ON runs (started_at DESC);
+  `,
 ]
 
 /** Run pending migrations, each in its own transaction. */

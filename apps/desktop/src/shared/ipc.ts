@@ -14,4 +14,8 @@ export const IPC = {
   schedulersUpdate: 'schedulers:update',
   schedulersSetActive: 'schedulers:setActive',
   schedulersRemove: 'schedulers:remove',
+  schedulersRunNow: 'schedulers:runNow',
+  runsList: 'runs:list',
+  runsChanged: 'runs:changed',
+  debugLookback: 'debug:lookback',
 } as const

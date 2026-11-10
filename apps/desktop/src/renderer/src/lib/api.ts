@@ -45,6 +45,14 @@ export function createApi(bridge: Bridge): Api {
       update: (id, input) => unwrap(bridge.schedulers.update(id, input)),
       setActive: (id, active) => unwrap(bridge.schedulers.setActive(id, active)),
       remove: (id) => unwrap(bridge.schedulers.remove(id)),
+      runNow: (id) => unwrap(bridge.schedulers.runNow(id)),
+    },
+    runs: {
+      list: (opts) => unwrap(bridge.runs.list(opts)),
+      onChange: (listener) => bridge.runs.onChange(listener),
+    },
+    debug: {
+      lookback: (id, days) => unwrap(bridge.debug.lookback(id, days)),
     },
   }
 }

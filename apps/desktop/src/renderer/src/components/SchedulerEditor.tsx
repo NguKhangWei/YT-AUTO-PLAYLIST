@@ -62,22 +62,45 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
     return m
   }, [schedulers, editing])
 
-  // Keep the current playlist selectable even if it was deleted on YouTube.
+  // The playlist list is authoritative once it has loaded: a playlist deleted on
+  // YouTube is not offered. Only while it is loading (or failed to load) is the
+  // current choice kept as an option, so the form doesn't lose it.
+  const listKnown = playlists !== null && !props.playlistsError
   const options = useMemo(() => {
     const list = playlists ?? []
-    if (form.playlistId && !list.some((p) => p.id === form.playlistId)) {
+    if (!listKnown && form.playlistId && !list.some((p) => p.id === form.playlistId)) {
       return [{ id: form.playlistId, title: form.playlistTitle, itemCount: 0 }, ...list]
     }
     return list
-  }, [playlists, form.playlistId, form.playlistTitle])
+  }, [playlists, listKnown, form.playlistId, form.playlistTitle])
+  const selectedExists = options.some((p) => p.id === form.playlistId)
+  /** Set when the scheduler's saved playlist was deleted on YouTube and is still selected. */
+  const gone =
+    editing &&
+    listKnown &&
+    form.playlistId === editing.playlistId &&
+    !(playlists ?? []).some((p) => p.id === editing.playlistId)
+      ? editing
+      : undefined
 
   const set = <K extends keyof SchedulerInput>(key: K, value: SchedulerInput[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    const problems: string[] = []
+    if (!selectedExists) {
+      problems.push(
+        gone
+          ? `"${gone.playlistTitle}" no longer exists on YouTube. Choose another playlist.`
+          : 'Choose a playlist.',
+      )
+    }
     if (!zones.includes(form.timezone)) {
-      setError(`Unknown time zone "${form.timezone}". Pick one from the list.`)
+      problems.push(`Unknown time zone "${form.timezone}". Pick one from the list.`)
+    }
+    if (problems.length > 0) {
+      setError(problems.join(' '))
       return
     }
     setSaving(true)
@@ -118,7 +141,7 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
             <Label htmlFor={`${ids}-playlist`}>Playlist</Label>
             <NativeSelect
               id={`${ids}-playlist`}
-              value={form.playlistId}
+              value={selectedExists ? form.playlistId : ''}
               onChange={(e) => {
                 const p = options.find((x) => x.id === e.target.value)
                 setForm((f) => ({
@@ -139,6 +162,12 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
                 )
               })}
             </NativeSelect>
+            {gone && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                &quot;{gone.playlistTitle}&quot; no longer exists on YouTube. Choose another
+                playlist.
+              </p>
+            )}
             {props.playlistsError && (
               <p className="text-xs text-destructive">
                 Couldn&apos;t load playlists: {props.playlistsError}

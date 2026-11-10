@@ -57,6 +57,7 @@ export function createSchedulerService(deps: { storage: SqliteStorage; now: () =
       lastSuccessAt: s.lastSuccessAt?.toISOString(),
       nextRunAt: s.nextRunAt.toISOString(),
       channels: tracked.map((t) => t.channel),
+      lastRun: storage.listRuns({ schedulerId: s.id, limit: 1 })[0],
     }
   }
 

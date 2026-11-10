@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiContext, ApiError } from '@/lib/api'
-import { channel, fakeApi, signedIn, view } from '@/test/fakeApi'
-import type { Playlist, SchedulerView } from '../../../shared/api'
+import { channel, fakeApi, run, signedIn, view } from '@/test/fakeApi'
+import type { Playlist, RunView, SchedulerView } from '../../../shared/api'
 import { HomeScreen } from './HomeScreen'
 
 const playlists: Playlist[] = [
@@ -15,6 +15,7 @@ function renderHome(
   opts: {
     schedulers?: SchedulerView[]
     playlists?: Playlist[]
+    runs?: RunView[]
     tweak?: (api: ReturnType<typeof fakeApi>['api']) => void
   } = {},
 ) {
@@ -226,5 +227,157 @@ describe('channels in the editor', () => {
     expect(api.schedulers.update.mock.calls[0]![1].channels.map((c) => c.title)).toEqual([
       'Channel 2',
     ])
+  })
+})
+
+describe('running scans', () => {
+  it('runs a scheduler now and shows the outcome on its card', async () => {
+    const { api } = renderHome({ schedulers: [view({ channels: [channel(1)] })] })
+    const card = await screen.findByRole('listitem', { name: 'Gaming' })
+    expect(within(card).getByText('Never')).toBeTruthy()
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Run now' }))
+    expect(within(card).getByRole('button', { name: 'Running…' })).toBeTruthy()
+    expect(await within(card).findByText('Added 2 videos')).toBeTruthy()
+    expect(within(card).getByText('OK')).toBeTruthy()
+    expect(within(card).getByRole('button', { name: 'Run now' })).toBeTruthy()
+    expect(api.schedulers.runNow).toHaveBeenCalledWith('s1')
+  })
+
+  it('cannot run a scheduler with no channels', async () => {
+    renderHome({ schedulers: [view()] })
+    const button = (await screen.findByRole('button', { name: 'Run now' })) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+  })
+
+  it('shows a failed last scan', async () => {
+    renderHome({
+      schedulers: [
+        view({
+          channels: [channel(1)],
+          lastRun: run({
+            status: 'error',
+            addedCount: 0,
+            error: { kind: 'quotaExceeded', message: 'Quota used up' },
+          }),
+        }),
+      ],
+    })
+    expect(await screen.findByText('Failed: Quota used up')).toBeTruthy()
+  })
+
+  it('shows a scan in progress (e.g. a scheduled one) as running', async () => {
+    renderHome({
+      schedulers: [view({ channels: [channel(1)], lastRun: run({ status: 'running' }) })],
+    })
+    const button = (await screen.findByRole('button', { name: 'Running…' })) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(screen.getByText('Scanning…')).toBeTruthy()
+  })
+
+  it('reloads schedulers when main reports a scan started or finished', async () => {
+    const fake = fakeApi(signedIn, { playlists, schedulers: [view({ channels: [channel(1)] })] })
+    render(
+      <ApiContext.Provider value={fake.api}>
+        <HomeScreen status={signedIn} onStatus={() => undefined} />
+      </ApiContext.Provider>,
+    )
+    await screen.findByRole('listitem', { name: 'Gaming' })
+    fake.api.schedulers.list.mockResolvedValueOnce([
+      view({
+        channels: [channel(1)],
+        active: false,
+        lastRun: run({ status: 'error', details: { ...run().details!, deactivated: true } }),
+      }),
+    ])
+    act(() => fake.emitRuns())
+    expect(await screen.findByText('Off')).toBeTruthy()
+  })
+
+  it('offers the development-only lookback', async () => {
+    const { api } = renderHome({ schedulers: [view({ channels: [channel(1)] })] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Debug: look back 7 days' }))
+    await waitFor(() => expect(api.debug.lookback).toHaveBeenCalledWith('s1', 7))
+    expect((await screen.findByRole('status')).textContent).toMatch(/last 7 days as new/)
+  })
+})
+
+describe('history tab', () => {
+  it('lists scans with their outcome and expandable details', async () => {
+    renderHome({
+      schedulers: [view()],
+      runs: [
+        run({
+          id: 'r2',
+          status: 'partial',
+          addedCount: 1,
+          error: { kind: 'quotaExceeded', message: 'Quota used up' },
+        }),
+        run({ id: 'r1', trigger: 'scheduled' }),
+      ],
+    })
+    fireEvent.click(await screen.findByRole('tab', { name: 'History' }))
+    const list = await screen.findByRole('list', { name: 'Scan history' })
+    const items = [...list.children] as HTMLElement[] // one per run (details have their own lists)
+    expect(items).toHaveLength(2)
+    expect(within(items[0]!).getByText('Added 1 video, then stopped: Quota used up')).toBeTruthy()
+    expect(within(items[0]!).getByText(/^Manual · /)).toBeTruthy()
+
+    const link = within(items[1]!).getByRole('link', { name: 'First video' }) as HTMLAnchorElement
+    expect(link.href).toBe('https://www.youtube.com/watch?v=v1')
+    expect(within(items[1]!).getByText('Skipped: 1 Shorts')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'New scheduler' })).toBeNull()
+  })
+
+  it('says when there are no scans yet', async () => {
+    renderHome()
+    fireEvent.click(await screen.findByRole('tab', { name: 'History' }))
+    expect(await screen.findByText(/No scans yet/)).toBeTruthy()
+  })
+})
+
+describe('playlist deleted on YouTube', () => {
+  // The scheduler still points at the old "INFORMATIVE" (PL-old); a new one with the same
+  // name exists under a different id.
+  const recreated: Playlist[] = [{ id: 'PL-new', title: 'INFORMATIVE', itemCount: 0 }]
+  const scheduler = view({ playlistId: 'PL-old', playlistTitle: 'INFORMATIVE' })
+
+  it('warns on the card', async () => {
+    renderHome({ schedulers: [scheduler], playlists: recreated })
+    expect((await screen.findByRole('alert')).textContent).toMatch(/no longer exists on YouTube/)
+  })
+
+  it('offers only existing playlists, warns, and requires a new choice before saving', async () => {
+    const { api } = renderHome({ schedulers: [scheduler], playlists: recreated })
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await within(dialog()).findByRole('option', { name: 'INFORMATIVE' })
+    expect(within(dialog()).getAllByRole('option', { name: 'INFORMATIVE' })).toHaveLength(1)
+    expect((field('Playlist') as HTMLSelectElement).value).toBe('')
+    expect(within(dialog()).getByText(/"INFORMATIVE" no longer exists on YouTube/)).toBeTruthy()
+
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    expect((await within(dialog()).findByRole('alert')).textContent).toMatch(/no longer exists/)
+    expect(api.schedulers.update).not.toHaveBeenCalled()
+
+    change('Playlist', 'PL-new')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(api.schedulers.update).toHaveBeenCalledWith(
+        's1',
+        expect.objectContaining({ playlistId: 'PL-new', playlistTitle: 'INFORMATIVE' }),
+      ),
+    )
+  })
+
+  it('keeps the current playlist when the list could not be loaded', async () => {
+    renderHome({
+      schedulers: [scheduler],
+      tweak: (api) =>
+        api.youtube.listMyPlaylists.mockRejectedValue(new ApiError('network', 'Offline')),
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await within(dialog()).findByText(/Couldn.t load playlists/)
+    expect((field('Playlist') as HTMLSelectElement).value).toBe('PL-old')
+    expect(screen.queryByText(/no longer exists/)).toBeNull()
   })
 })

@@ -1,5 +1,41 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
 import type { Channel, ScanStorage, SchedulerRecord, TrackedChannel } from '@auto-yt/core'
+import type { RunDetails, RunStatus, RunView } from '../../shared/api'
+
+interface RunRow {
+  id: string
+  scheduler_id: string
+  scheduler_name: string
+  trigger: 'manual' | 'scheduled'
+  status: RunStatus
+  started_at: number
+  finished_at: number | null
+  added_count: number
+  error_kind: string | null
+  error_message: string | null
+  details_json: string | null
+}
+
+const toRun = (r: RunRow): RunView => ({
+  id: r.id,
+  schedulerId: r.scheduler_id,
+  schedulerName: r.scheduler_name,
+  trigger: r.trigger,
+  status: r.status,
+  startedAt: new Date(r.started_at).toISOString(),
+  ...(r.finished_at !== null ? { finishedAt: new Date(r.finished_at).toISOString() } : {}),
+  addedCount: r.added_count,
+  ...(r.error_kind !== null
+    ? { error: { kind: r.error_kind, message: r.error_message ?? '' } }
+    : {}),
+  ...(r.details_json !== null ? { details: JSON.parse(r.details_json) as RunDetails } : {}),
+})
+
+const RUN_SELECT = `SELECT r.*, s.name AS scheduler_name FROM runs r
+  JOIN schedulers s ON s.id = r.scheduler_id`
+
+/** How many runs to keep in history (oldest are deleted). */
+export const MAX_RUNS = 500
 
 interface SchedulerRow {
   id: string
@@ -114,6 +150,24 @@ export function createSqliteStorage(db: DatabaseSync) {
       ON CONFLICT (pt_date) DO UPDATE SET units = units + excluded.units`),
     getQuota: db.prepare('SELECT units FROM quota_usage WHERE pt_date = ?'),
     pruneQuota: db.prepare('DELETE FROM quota_usage WHERE pt_date < ?'),
+    insertRun: db.prepare(`INSERT INTO runs (id, scheduler_id, trigger, status, started_at)
+      VALUES (?, ?, ?, 'running', ?)`),
+    finishRun: db.prepare(`UPDATE runs SET status = :status, finished_at = :finished_at,
+      added_count = :added_count, error_kind = :error_kind, error_message = :error_message,
+      details_json = :details_json WHERE id = :id`),
+    listRuns: db.prepare(`${RUN_SELECT} ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`),
+    listRunsFor: db.prepare(
+      `${RUN_SELECT} WHERE r.scheduler_id = ? ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`,
+    ),
+    interrupt: db.prepare(`UPDATE runs SET status = 'error', finished_at = ?,
+      error_kind = 'interrupted', error_message = 'The app closed before this scan finished.'
+      WHERE status = 'running'`),
+    pruneRuns: db.prepare(`DELETE FROM runs WHERE id NOT IN
+      (SELECT id FROM runs ORDER BY started_at DESC, rowid DESC LIMIT ?)`),
+    lookbackChannels: db.prepare(
+      'UPDATE scheduler_channels SET since_at = ? WHERE scheduler_id = ?',
+    ),
+    clearLastSuccess: db.prepare('UPDATE schedulers SET last_success_at = NULL WHERE id = ?'),
   }
 
   const scan: ScanStorage = {
@@ -192,6 +246,57 @@ export function createSqliteStorage(db: DatabaseSync) {
     },
     quotaUnitsUsed(ptDate: string): number {
       return (q.getQuota.get(ptDate) as { units: number } | undefined)?.units ?? 0
+    },
+    /** Record that a scan started. */
+    startRun(run: {
+      id: string
+      schedulerId: string
+      trigger: 'manual' | 'scheduled'
+      startedAt: Date
+    }): void {
+      q.insertRun.run(run.id, run.schedulerId, run.trigger, run.startedAt.getTime())
+    },
+    /** Record how a scan ended, and trim history to the newest MAX_RUNS. */
+    finishRun(
+      id: string,
+      r: {
+        status: Exclude<RunStatus, 'running'>
+        finishedAt: Date
+        addedCount: number
+        error?: { kind: string; message: string }
+        details?: RunDetails
+      },
+    ): void {
+      q.finishRun.run({
+        id,
+        status: r.status,
+        finished_at: r.finishedAt.getTime(),
+        added_count: r.addedCount,
+        error_kind: r.error?.kind ?? null,
+        error_message: r.error?.message ?? null,
+        details_json: r.details ? JSON.stringify(r.details) : null,
+      })
+      q.pruneRuns.run(MAX_RUNS)
+    },
+    /** Newest first; all schedulers, or one. */
+    listRuns(opts: { schedulerId?: string; limit?: number } = {}): RunView[] {
+      const limit = opts.limit ?? 100
+      const rows = opts.schedulerId
+        ? q.listRunsFor.all(opts.schedulerId, limit)
+        : q.listRuns.all(limit)
+      return (rows as unknown as RunRow[]).map(toRun)
+    },
+    /** Runs left "running" by a crash or quit are marked as interrupted. */
+    markInterruptedRuns(at: Date): void {
+      q.interrupt.run(at.getTime())
+    },
+    /**
+     * Development aid: make every channel of a scheduler count uploads since
+     * `since`, and forget the last success so the cursor starts there.
+     */
+    debugLookback(schedulerId: string, since: Date): void {
+      q.lookbackChannels.run(since.getTime(), schedulerId)
+      q.clearLastSuccess.run(schedulerId)
     },
     /** Run `fn` in a transaction (all or nothing). */
     transaction<T>(fn: () => T): T {
