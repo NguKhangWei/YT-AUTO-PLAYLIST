@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiContext, ApiError } from '@/lib/api'
-import { fakeApi, signedIn, view } from '@/test/fakeApi'
+import { channel, fakeApi, signedIn, view } from '@/test/fakeApi'
 import type { Playlist, SchedulerView } from '../../../shared/api'
 import { HomeScreen } from './HomeScreen'
 
@@ -105,6 +105,7 @@ describe('scheduler editor', () => {
       intervalDays: 3,
       timeOfDay: '21:15',
       timezone: 'Asia/Kuala_Lumpur',
+      channels: [],
     })
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -146,6 +147,7 @@ describe('scheduler editor', () => {
     )
     // Only input fields are sent, not the whole view.
     expect(Object.keys(api.schedulers.update.mock.calls[0]![1]).sort()).toEqual([
+      'channels',
       'intervalDays',
       'name',
       'playlistId',
@@ -192,5 +194,37 @@ describe('scheduler editor', () => {
     })
     fireEvent.click(await screen.findByRole('button', { name: 'New scheduler' }))
     expect(await within(dialog()).findByText(/Couldn.t load playlists: Quota used up/)).toBeTruthy()
+  })
+})
+
+describe('channels in the editor', () => {
+  it('adds searched channels to a new scheduler and shows them on the card', async () => {
+    const { api } = renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'New scheduler' }))
+    change('Name', 'Tech')
+    await within(dialog()).findByRole('option', { name: 'Learning' })
+    change('Playlist', 'PL2')
+    change('Channels to track', 'channel')
+    fireEvent.click(
+      await within(dialog()).findByRole('button', { name: 'Add Channel 2' }, { timeout: 2000 }),
+    )
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Create' }))
+
+    const card = await screen.findByRole('listitem', { name: 'Tech' })
+    expect(within(card).getByText('Channel 2')).toBeTruthy()
+    expect(api.schedulers.create.mock.calls[0]![0].channels.map((c) => c.title)).toEqual([
+      'Channel 2',
+    ])
+  })
+
+  it('edits the channel list of an existing scheduler', async () => {
+    const { api } = renderHome({ schedulers: [view({ channels: [channel(1), channel(2)] })] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Remove Channel 1' }))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.schedulers.update).toHaveBeenCalled())
+    expect(api.schedulers.update.mock.calls[0]![1].channels.map((c) => c.title)).toEqual([
+      'Channel 2',
+    ])
   })
 })

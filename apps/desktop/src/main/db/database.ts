@@ -47,6 +47,19 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (scheduler_id, video_id)
   ) STRICT, WITHOUT ROWID;
   `,
+  // 2: channel search cache, API quota used per Pacific-time day
+  `
+  CREATE TABLE search_cache (
+    query        TEXT PRIMARY KEY,
+    results_json TEXT NOT NULL,
+    fetched_at   INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE TABLE quota_usage (
+    pt_date TEXT PRIMARY KEY,
+    units   INTEGER NOT NULL
+  ) STRICT;
+  `,
 ]
 
 /** Run pending migrations, each in its own transaction. */

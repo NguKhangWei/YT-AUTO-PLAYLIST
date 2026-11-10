@@ -24,3 +24,13 @@ export function timeZones(defaultZone: string): string[] {
   const all = Intl.supportedValuesOf('timeZone')
   return [defaultZone, ...all.filter((z) => z !== defaultZone)]
 }
+
+/** "1.2M subscribers", or undefined when the channel hides its count. */
+export function formatSubscribers(count: number | undefined): string | undefined {
+  if (count === undefined) return undefined
+  const n = new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(count)
+  return `${n} ${count === 1 ? 'subscriber' : 'subscribers'}`
+}

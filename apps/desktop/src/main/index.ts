@@ -1,10 +1,14 @@
 import { join } from 'node:path'
+import { createYouTubeClient } from '@auto-yt/core'
 import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron'
+import { IPC } from '../shared/ipc'
 import { createGoogleAuth } from './auth/google-auth'
 import { createEncryptedFileStore } from './auth/token-store'
 import { openDatabase } from './db/database'
 import { createSqliteStorage } from './db/sqlite-storage'
+import { createChannelService } from './channels'
 import { registerIpc } from './ipc'
+import { createQuotaTracker } from './quota'
 import { createSchedulerService } from './schedulers'
 
 function createWindow(): void {
@@ -48,8 +52,21 @@ void app.whenReady().then(() => {
     openExternal: (url) => shell.openExternal(url),
   })
   const storage = createSqliteStorage(openDatabase(join(app.getPath('userData'), 'auto-yt.db')))
-  const schedulers = createSchedulerService({ storage, now: () => new Date() })
-  registerIpc({ ipcMain, auth, schedulers, getWindows: () => BrowserWindow.getAllWindows() })
+  const now = () => new Date()
+  const getWindows = () => BrowserWindow.getAllWindows()
+  const quota = createQuotaTracker({
+    storage,
+    now,
+    onChange: (status) => getWindows().forEach((w) => w.webContents.send(IPC.quotaChanged, status)),
+  })
+  // One client for the whole app, so every API call is counted in the quota meter.
+  const youtube = createYouTubeClient({
+    getAccessToken: auth.getAccessToken,
+    onQuota: (units) => quota.record(units),
+  })
+  const schedulers = createSchedulerService({ storage, now })
+  const channels = createChannelService({ storage, youtube, now })
+  registerIpc({ ipcMain, auth, youtube, schedulers, channels, quota, getWindows })
 
   createWindow()
   app.on('activate', () => {

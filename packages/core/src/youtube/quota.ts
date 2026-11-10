@@ -22,3 +22,11 @@ export type ApiMethod = keyof typeof QUOTA_COSTS
 export function quotaDay(at: Date): string {
   return DateTime.fromJSDate(at, { zone: 'America/Los_Angeles' }).toFormat('yyyy-MM-dd')
 }
+
+/** When the quota day containing `at` ends: the next midnight in Pacific Time. */
+export function nextQuotaReset(at: Date): Date {
+  return DateTime.fromJSDate(at, { zone: 'America/Los_Angeles' })
+    .startOf('day')
+    .plus({ days: 1 })
+    .toJSDate()
+}

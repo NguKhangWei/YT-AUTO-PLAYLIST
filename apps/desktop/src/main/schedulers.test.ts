@@ -12,6 +12,7 @@ const input = (over: Partial<SchedulerInput> = {}): SchedulerInput => ({
   intervalDays: 1,
   timeOfDay: '09:00',
   timezone: 'Asia/Kuala_Lumpur',
+  channels: [],
   ...over,
 })
 
@@ -167,5 +168,87 @@ describe('input hygiene', () => {
   it('rejects missing fields with a validation error, not a crash', async () => {
     const { service } = setup()
     await expect(service.create({} as never)).rejects.toMatchObject({ kind: 'validation' })
+  })
+})
+
+describe('tracked channels', () => {
+  const ch = (n: number) => ({
+    id: `UC${String(n).padStart(22, '0')}`,
+    title: `Channel ${n}`,
+    uploadsPlaylistId: `UU${String(n).padStart(22, '0')}`,
+  })
+
+  it('tracks channels from creation; new ones count uploads from the moment they are saved', async () => {
+    const t = setup()
+    const s = await t.service.create(input({ channels: [ch(1)] }))
+    expect(s.channels.map((c) => c.id)).toEqual([ch(1).id])
+
+    t.setNow('2026-11-12T00:00:00Z')
+    await t.service.update(s.id, input({ channels: [ch(1), ch(2)] }))
+    const since = Object.fromEntries(
+      (await t.storage.listTrackedChannels(s.id)).map((x) => [
+        x.channel.id,
+        x.sinceAt.toISOString(),
+      ]),
+    )
+    expect(since).toEqual({
+      [ch(1).id]: '2026-11-10T00:00:00.000Z', // kept
+      [ch(2).id]: '2026-11-12T00:00:00.000Z', // new
+    })
+  })
+
+  it('untracks removed channels, and re-adding starts fresh', async () => {
+    const t = setup()
+    const s = await t.service.create(input({ channels: [ch(1), ch(2)] }))
+    t.setNow('2026-11-11T00:00:00Z')
+    const u = await t.service.update(s.id, input({ channels: [ch(2)] }))
+    expect(u.channels.map((c) => c.id)).toEqual([ch(2).id])
+    t.setNow('2026-11-12T00:00:00Z')
+    await t.service.update(s.id, input({ channels: [ch(1), ch(2)] }))
+    const tracked = await t.storage.listTrackedChannels(s.id)
+    expect(tracked.find((x) => x.channel.id === ch(1).id)?.sinceAt.toISOString()).toBe(
+      '2026-11-12T00:00:00.000Z',
+    )
+  })
+
+  it('lets two schedulers track the same channel independently', async () => {
+    const t = setup()
+    const a = await t.service.create(input({ name: 'A', playlistId: 'PL-A', channels: [ch(1)] }))
+    const b = await t.service.create(input({ name: 'B', playlistId: 'PL-B', channels: [ch(1)] }))
+    await t.service.update(a.id, input({ name: 'A', playlistId: 'PL-A', channels: [] }))
+    expect((await t.service.list()).find((x) => x.id === b.id)?.channels).toHaveLength(1)
+  })
+
+  it('drops malformed channels and duplicates, and keeps only https avatars', async () => {
+    const { service } = setup()
+    const s = await service.create(
+      input({
+        channels: [
+          ch(1),
+          { ...ch(1), title: 'dup' },
+          { id: 'not-a-channel', title: 'x', uploadsPlaylistId: 'UUx' },
+          { ...ch(2), thumbnailUrl: 'javascript:alert(1)' },
+        ],
+      }),
+    )
+    // Listed by title, so compare without order.
+    expect(s.channels).toHaveLength(2)
+    expect(s.channels).toEqual(expect.arrayContaining([{ ...ch(1), title: 'dup' }, ch(2)]))
+  })
+
+  it('limits a scheduler to 100 channels', async () => {
+    const { service } = setup()
+    const many = Array.from({ length: 101 }, (_, i) => ch(i))
+    await expect(service.create(input({ channels: many }))).rejects.toMatchObject({
+      kind: 'validation',
+      message: expect.stringContaining('at most 100'),
+    })
+  })
+
+  it('saves nothing when the scheduler is invalid (all or nothing)', async () => {
+    const t = setup()
+    await t.service.create(input({ name: 'A', channels: [ch(1)] }))
+    await expect(t.service.create(input({ name: 'B', channels: [ch(2)] }))).rejects.toThrow()
+    expect(await t.service.list()).toHaveLength(1)
   })
 })

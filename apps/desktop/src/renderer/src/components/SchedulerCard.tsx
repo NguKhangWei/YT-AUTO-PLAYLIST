@@ -1,5 +1,6 @@
 import { Pencil, Trash2 } from 'lucide-react'
 import type { SchedulerView } from '../../../shared/api'
+import { ChannelAvatar } from '@/components/ChannelAvatar'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { formatInZone, intervalLabel } from '@/lib/format'
@@ -36,7 +37,20 @@ export function SchedulerCard({
         <dt className="text-muted-foreground">Next scan</dt>
         <dd>{s.active ? formatInZone(s.nextRunAt, s.timezone) : '—'}</dd>
         <dt className="text-muted-foreground">Channels</dt>
-        <dd>{s.channels.length === 0 ? 'None yet' : s.channels.map((c) => c.title).join(', ')}</dd>
+        <dd>
+          {s.channels.length === 0 ? (
+            'None yet'
+          ) : (
+            <ul aria-label={`${s.name} channels`} className="flex flex-wrap gap-x-3 gap-y-1">
+              {s.channels.map((c) => (
+                <li key={c.id} className="flex items-center gap-1.5">
+                  <ChannelAvatar channel={c} className="size-5" />
+                  <span>{c.title}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </dd>
       </dl>
 
       <div className="mt-3 flex justify-end gap-2">

@@ -1,5 +1,14 @@
 import { vi } from 'vitest'
-import type { Api, AuthStatus, Playlist, SchedulerInput, SchedulerView } from '../../../shared/api'
+import type {
+  Api,
+  AuthStatus,
+  Channel,
+  ChannelSearchResult,
+  Playlist,
+  QuotaStatus,
+  SchedulerInput,
+  SchedulerView,
+} from '../../../shared/api'
 import { ApiError } from '../lib/api'
 
 export const signedOut: AuthStatus = { configured: true, signedIn: false, signingIn: false }
@@ -18,23 +27,39 @@ export const view = (over: Partial<SchedulerView> = {}): SchedulerView => ({
   intervalDays: 1,
   timeOfDay: '09:00',
   timezone: 'Asia/Kuala_Lumpur',
+  channels: [],
   active: true,
   createdAt: '2026-11-10T00:00:00.000Z',
   nextRunAt: '2026-11-11T01:00:00.000Z',
-  channels: [],
+  ...over,
+})
+
+/** A channel as search returns it. */
+export const channel = (n: number, over: Partial<Channel> = {}): Channel => ({
+  id: `UC${String(n).padStart(22, '0')}`,
+  title: `Channel ${n}`,
+  handle: `@channel${n}`,
+  subscriberCount: 1_250_000,
+  uploadsPlaylistId: `UU${String(n).padStart(22, '0')}`,
   ...over,
 })
 
 /**
  * A controllable fake of the renderer `Api`. Schedulers live in memory and
- * enforce one-playlist-per-scheduler like main does. `emit` simulates a
- * main-process auth status push.
+ * enforce one-playlist-per-scheduler like main does. `emit`/`emitQuota`
+ * simulate pushes from main.
  */
 export function fakeApi(
   initial: AuthStatus,
-  opts: { playlists?: Playlist[]; schedulers?: SchedulerView[] } = {},
+  opts: {
+    playlists?: Playlist[]
+    schedulers?: SchedulerView[]
+    search?: (query: string) => ChannelSearchResult
+    quota?: QuotaStatus
+  } = {},
 ) {
   const listeners = new Set<(s: AuthStatus) => void>()
+  const quotaListeners = new Set<(s: QuotaStatus) => void>()
   let schedulers = [...(opts.schedulers ?? [])]
   let nextId = 100
 
@@ -58,6 +83,22 @@ export function fakeApi(
     },
     youtube: {
       listMyPlaylists: vi.fn(async () => opts.playlists ?? []),
+    },
+    channels: {
+      search: vi.fn(
+        async (query: string): Promise<ChannelSearchResult> =>
+          opts.search?.(query) ?? { source: 'search', channels: [channel(1), channel(2)] },
+      ),
+    },
+    quota: {
+      get: vi.fn(
+        async (): Promise<QuotaStatus> =>
+          opts.quota ?? { used: 0, limit: 10_000, resetsAt: '2026-11-11T08:00:00.000Z' },
+      ),
+      onChange: vi.fn((l: (s: QuotaStatus) => void) => {
+        quotaListeners.add(l)
+        return () => quotaListeners.delete(l)
+      }),
     },
     schedulers: {
       list: vi.fn(async () => schedulers),
@@ -83,5 +124,9 @@ export function fakeApi(
       }),
     },
   } satisfies Api
-  return { api, emit: (s: AuthStatus) => listeners.forEach((l) => l(s)) }
+  return {
+    api,
+    emit: (s: AuthStatus) => listeners.forEach((l) => l(s)),
+    emitQuota: (q: QuotaStatus) => quotaListeners.forEach((l) => l(q)),
+  }
 }

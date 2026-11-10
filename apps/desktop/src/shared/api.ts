@@ -16,6 +16,27 @@ export interface SchedulerInput {
   timeOfDay: string
   /** IANA zone, default "Asia/Kuala_Lumpur". */
   timezone: string
+  /** Channels to track. Newly added ones only count uploads from the moment they're saved. */
+  channels: Channel[]
+}
+
+/** Result of the channel search box. */
+export interface ChannelSearchResult {
+  /**
+   * lookup: a pasted URL/@handle/id was looked up (1 unit);
+   * search: a new search (101 units); cache: same search within 24 h (free);
+   * tooShort: under 3 characters, nothing sent.
+   */
+  source: 'lookup' | 'search' | 'cache' | 'tooShort'
+  channels: Channel[]
+}
+
+/** This app's YouTube API usage today (the quota resets at midnight Pacific Time). */
+export interface QuotaStatus {
+  used: number
+  limit: number
+  /** ISO time of the next reset. */
+  resetsAt: string
 }
 
 /** A scheduler as the UI shows it. Dates are ISO strings. */
@@ -25,7 +46,6 @@ export interface SchedulerView extends SchedulerInput {
   createdAt: string
   lastSuccessAt?: string
   nextRunAt: string
-  channels: Channel[]
 }
 
 /** The signed-in Google account, for the header. */
@@ -70,6 +90,15 @@ export interface Api {
   youtube: {
     listMyPlaylists(): Promise<Playlist[]>
   }
+  channels: {
+    /** Search by name, or look up a pasted URL/@handle/channel id. */
+    search(query: string): Promise<ChannelSearchResult>
+  }
+  quota: {
+    get(): Promise<QuotaStatus>
+    /** Pushed by main after every API call. Returns unsubscribe. */
+    onChange(listener: (status: QuotaStatus) => void): () => void
+  }
   schedulers: {
     list(): Promise<SchedulerView[]>
     /** Rejects with kind "validation" and a readable message for bad input or a used playlist. */
@@ -92,5 +121,7 @@ export interface Bridge {
   versions: Api['versions']
   auth: Enveloped<Api['auth']>
   youtube: Enveloped<Api['youtube']>
+  channels: Enveloped<Api['channels']>
+  quota: Enveloped<Api['quota']>
   schedulers: Enveloped<Api['schedulers']>
 }

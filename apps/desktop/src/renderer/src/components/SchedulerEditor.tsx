@@ -1,6 +1,7 @@
 import { DEFAULT_TIMEZONE, MAX_INTERVAL_DAYS, MIN_INTERVAL_DAYS } from '@auto-yt/core'
 import { useId, useMemo, useState, type FormEvent } from 'react'
 import type { Playlist, SchedulerInput, SchedulerView } from '../../../shared/api'
+import { ChannelPicker } from '@/components/ChannelPicker'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input, Label, NativeSelect } from '@/components/ui/input'
@@ -19,6 +20,7 @@ const blank = (): SchedulerInput => ({
   intervalDays: 1,
   timeOfDay: '09:00',
   timezone: DEFAULT_TIMEZONE,
+  channels: [],
 })
 
 export interface SchedulerEditorProps {
@@ -46,6 +48,7 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
           intervalDays: editing.intervalDays,
           timeOfDay: editing.timeOfDay,
           timezone: editing.timezone,
+          channels: editing.channels,
         }
       : blank(),
   )
@@ -189,9 +192,10 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
             </datalist>
           </div>
 
-          <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
-            Channels to track can be added once channel search arrives (next milestone).
-          </p>
+          <ChannelPicker
+            selected={form.channels}
+            onChange={(channels) => set('channels', channels)}
+          />
 
           {error && (
             <p role="alert" className="text-sm text-destructive">

@@ -103,6 +103,17 @@ export function createSqliteStorage(db: DatabaseSync) {
     recordHandled: db.prepare(
       'INSERT OR IGNORE INTO handled_videos (scheduler_id, video_id, handled_at) VALUES (?, ?, ?)',
     ),
+    getCache: db.prepare('SELECT results_json, fetched_at FROM search_cache WHERE query = ?'),
+    putCache: db.prepare(`
+      INSERT INTO search_cache (query, results_json, fetched_at) VALUES (?, ?, ?)
+      ON CONFLICT (query) DO UPDATE SET results_json = excluded.results_json,
+        fetched_at = excluded.fetched_at`),
+    pruneCache: db.prepare('DELETE FROM search_cache WHERE fetched_at < ?'),
+    addQuota: db.prepare(`
+      INSERT INTO quota_usage (pt_date, units) VALUES (?, ?)
+      ON CONFLICT (pt_date) DO UPDATE SET units = units + excluded.units`),
+    getQuota: db.prepare('SELECT units FROM quota_usage WHERE pt_date = ?'),
+    pruneQuota: db.prepare('DELETE FROM quota_usage WHERE pt_date < ?'),
   }
 
   const scan: ScanStorage = {
@@ -161,6 +172,26 @@ export function createSqliteStorage(db: DatabaseSync) {
     },
     untrackChannel(schedulerId: string, channelId: string): void {
       q.untrack.run(schedulerId, channelId)
+    },
+    /** Cached search results newer than `minFetchedAt`, or undefined. */
+    getCachedSearch(query: string, minFetchedAt: Date): Channel[] | undefined {
+      const row = q.getCache.get(query) as { results_json: string; fetched_at: number } | undefined
+      if (!row || row.fetched_at < minFetchedAt.getTime()) return undefined
+      return JSON.parse(row.results_json) as Channel[]
+    },
+    /** Store search results and drop entries older than `pruneBefore`. */
+    putCachedSearch(query: string, channels: Channel[], at: Date, pruneBefore: Date): void {
+      q.putCache.run(query, JSON.stringify(channels), at.getTime())
+      q.pruneCache.run(pruneBefore.getTime())
+    },
+    /** Add API units to a Pacific-time quota day ("yyyy-MM-dd"); keeps 30 days of history. */
+    addQuotaUnits(ptDate: string, units: number): void {
+      q.addQuota.run(ptDate, units)
+      const [y, m, d] = ptDate.split('-').map(Number) as [number, number, number]
+      q.pruneQuota.run(new Date(Date.UTC(y, m - 1, d - 30)).toISOString().slice(0, 10))
+    },
+    quotaUnitsUsed(ptDate: string): number {
+      return (q.getQuota.get(ptDate) as { units: number } | undefined)?.units ?? 0
     },
     /** Run `fn` in a transaction (all or nothing). */
     transaction<T>(fn: () => T): T {

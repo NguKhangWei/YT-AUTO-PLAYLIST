@@ -99,3 +99,49 @@ describe('sqlite storage', () => {
     expect(s.listSchedulers()).toEqual([])
   })
 })
+
+describe('search cache', () => {
+  const ch = contractChannel('UC1').channel
+
+  it('returns fresh entries only, and prunes old ones on write', () => {
+    const s = createSqliteStorage(openDatabase(':memory:'))
+    s.putCachedSearch('linus', [ch], new Date(1000), new Date(0))
+    expect(s.getCachedSearch('linus', new Date(500))).toEqual([ch])
+    expect(s.getCachedSearch('linus', new Date(1001))).toBeUndefined()
+    expect(s.getCachedSearch('other', new Date(0))).toBeUndefined()
+
+    s.putCachedSearch('new', [], new Date(5000), new Date(2000)) // prunes 'linus'
+    expect(s.getCachedSearch('linus', new Date(0))).toBeUndefined()
+    expect(s.getCachedSearch('new', new Date(0))).toEqual([])
+  })
+})
+
+describe('quota usage', () => {
+  it('sums units per day and forgets days older than 30', () => {
+    const s = createSqliteStorage(openDatabase(':memory:'))
+    s.addQuotaUnits('2026-10-01', 7)
+    s.addQuotaUnits('2026-11-10', 100)
+    s.addQuotaUnits('2026-11-10', 50)
+    expect(s.quotaUnitsUsed('2026-11-10')).toBe(150)
+    expect(s.quotaUnitsUsed('2026-11-11')).toBe(0)
+    expect(s.quotaUnitsUsed('2026-10-01')).toBe(0) // pruned by the Nov 10 write
+  })
+})
+
+describe('upgrading an existing database', () => {
+  it('upgrades a v1 (M6) database to the latest version without losing schedulers', async () => {
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(':memory:')
+    db.exec('PRAGMA foreign_keys = ON')
+    db.exec(MIGRATIONS[0]!)
+    db.exec('PRAGMA user_version = 1')
+    // Plain SQL: the storage itself needs the latest schema (the app always migrates first).
+    db.exec(`INSERT INTO schedulers VALUES ('old', 'Scheduler old', 'PL-old', 'Playlist old',
+      1, '09:00', 'Asia/Kuala_Lumpur', 1, 0, NULL, 0)`)
+
+    migrate(db)
+    const s = createSqliteStorage(db)
+    expect((await s.getScheduler('old'))?.name).toBe('Scheduler old')
+    expect(s.quotaUnitsUsed('2026-11-10')).toBe(0) // v2 tables exist
+  })
+})

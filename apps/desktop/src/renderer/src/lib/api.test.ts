@@ -12,6 +12,8 @@ const bridge = (over: Partial<Bridge['youtube']> = {}): Bridge => ({
     onStatusChange: vi.fn(() => () => undefined),
   },
   youtube: { listMyPlaylists: vi.fn(), ...over },
+  channels: { search: vi.fn() },
+  quota: { get: vi.fn(), onChange: vi.fn(() => () => undefined) },
   schedulers: {
     list: vi.fn(),
     create: vi.fn(),

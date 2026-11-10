@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { QUOTA_COSTS, quotaDay, toYouTubeError } from '../src'
+import { QUOTA_COSTS, nextQuotaReset, quotaDay, toYouTubeError } from '../src'
 
 describe('quotaDay', () => {
   it('rolls over at midnight Pacific Time, not UTC or Malaysia Time', () => {
@@ -33,5 +33,22 @@ describe('toYouTubeError', () => {
       kind: 'unknown',
       message: 'YouTube API request failed with HTTP 502',
     })
+  })
+})
+
+describe('nextQuotaReset', () => {
+  it('is the next midnight Pacific Time (16:00 Malaysia Time in winter)', () => {
+    expect(nextQuotaReset(new Date('2026-11-10T03:00:00Z')).toISOString()).toBe(
+      '2026-11-10T08:00:00.000Z',
+    )
+    expect(nextQuotaReset(new Date('2026-11-10T08:00:00Z')).toISOString()).toBe(
+      '2026-11-11T08:00:00.000Z',
+    )
+  })
+
+  it('follows daylight time in summer (15:00 Malaysia Time)', () => {
+    expect(nextQuotaReset(new Date('2026-07-01T12:00:00Z')).toISOString()).toBe(
+      '2026-07-02T07:00:00.000Z',
+    )
   })
 })

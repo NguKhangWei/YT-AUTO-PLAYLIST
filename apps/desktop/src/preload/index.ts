@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AuthStatus, Bridge } from '../shared/api'
+import type { AuthStatus, Bridge, QuotaStatus } from '../shared/api'
 import { IPC } from '../shared/ipc'
 
 // Results pass through as `IpcResult` envelopes; the renderer unwraps them
@@ -28,6 +28,17 @@ const bridge: Bridge = {
   },
   youtube: {
     listMyPlaylists: invoke(IPC.youtubeListMyPlaylists),
+  },
+  channels: {
+    search: invoke(IPC.channelsSearch),
+  },
+  quota: {
+    get: invoke(IPC.quotaGet),
+    onChange(listener) {
+      const handler = (_e: unknown, status: QuotaStatus) => listener(status)
+      ipcRenderer.on(IPC.quotaChanged, handler)
+      return () => ipcRenderer.removeListener(IPC.quotaChanged, handler)
+    },
   },
   schedulers: {
     list: invoke(IPC.schedulersList),

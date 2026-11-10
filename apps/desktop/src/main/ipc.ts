@@ -1,8 +1,10 @@
-import { createYouTubeClient, YouTubeApiError, type YouTubeClient } from '@auto-yt/core'
+import { YouTubeApiError, type YouTubeClient } from '@auto-yt/core'
 import type { BrowserWindow, IpcMain } from 'electron'
 import type { ApiErrorInfo, AuthStatus, IpcResult, SchedulerInput } from '../shared/api'
 import { IPC } from '../shared/ipc'
 import type { GoogleAuth } from './auth/google-auth'
+import type { ChannelService } from './channels'
+import type { QuotaTracker } from './quota'
 import type { SchedulerService } from './schedulers'
 
 export function toErrorInfo(e: unknown): ApiErrorInfo {
@@ -48,11 +50,13 @@ export function wrap<A extends unknown[], T>(fn: (...args: A) => Promise<T> | T)
 export function registerIpc(deps: {
   ipcMain: IpcMain
   auth: GoogleAuth
+  youtube: YouTubeClient
   schedulers: SchedulerService
+  channels: ChannelService
+  quota: QuotaTracker
   getWindows: () => BrowserWindow[]
 }): void {
-  const { ipcMain, auth, schedulers } = deps
-  const youtube = createYouTubeClient({ getAccessToken: auth.getAccessToken })
+  const { ipcMain, auth, youtube, schedulers, channels, quota } = deps
 
   ipcMain.handle(IPC.authGetStatus, wrap(auth.status))
   ipcMain.handle(IPC.authSignIn, wrap(auth.signIn))
@@ -65,6 +69,12 @@ export function registerIpc(deps: {
     IPC.youtubeListMyPlaylists,
     wrap(() => listMyPlaylists(youtube)),
   )
+
+  ipcMain.handle(
+    IPC.channelsSearch,
+    wrap((query: string) => channels.search(String(query ?? ''))),
+  )
+  ipcMain.handle(IPC.quotaGet, wrap(quota.status))
 
   ipcMain.handle(IPC.schedulersList, wrap(schedulers.list))
   ipcMain.handle(
