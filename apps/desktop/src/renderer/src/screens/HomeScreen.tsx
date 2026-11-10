@@ -1,13 +1,13 @@
+import { Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import type { AuthStatus, Playlist } from '../../../shared/api'
+import type { AuthStatus, Playlist, SchedulerView } from '../../../shared/api'
 import { AccountHeader } from '@/components/AccountHeader'
+import { SchedulerCard } from '@/components/SchedulerCard'
+import { SchedulerEditor } from '@/components/SchedulerEditor'
 import { Button } from '@/components/ui/button'
 import { useApi } from '@/lib/api'
 
-type Load =
-  | { state: 'loading' }
-  | { state: 'error'; message: string }
-  | { state: 'done'; playlists: Playlist[] }
+type Editor = { mode: 'closed' } | { mode: 'create' } | { mode: 'edit'; scheduler: SchedulerView }
 
 export function HomeScreen({
   status,
@@ -17,21 +17,70 @@ export function HomeScreen({
   onStatus: (s: AuthStatus) => void
 }) {
   const api = useApi()
-  const [load, setLoad] = useState<Load>({ state: 'loading' })
+  const [schedulers, setSchedulers] = useState<SchedulerView[] | null>(null)
+  const [playlists, setPlaylists] = useState<Playlist[] | null>(null)
+  const [playlistsError, setPlaylistsError] = useState<string>()
+  const [error, setError] = useState<string | null>(null)
+  const [editor, setEditor] = useState<Editor>({ mode: 'closed' })
 
-  const refresh = useCallback(async () => {
-    setLoad({ state: 'loading' })
-    try {
-      setLoad({ state: 'done', playlists: await api.youtube.listMyPlaylists() })
-    } catch (e) {
-      setLoad({ state: 'error', message: (e as Error).message })
-    }
-  }, [api])
+  /** Fetch playlists; `apply` receives the result so callers decide whether it's still wanted. */
+  const fetchPlaylists = useCallback(
+    (apply: (playlists: Playlist[], error?: string) => void) =>
+      api.youtube.listMyPlaylists().then(
+        (p) => apply(p),
+        (e: Error) => apply([], e.message),
+      ),
+    [api],
+  )
 
+  const applyPlaylists = (p: Playlist[], err?: string) => {
+    setPlaylists(p)
+    setPlaylistsError(err)
+  }
+
+  // Initial load. State is set in promise callbacks, and skipped after unmount.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load
-    void refresh()
-  }, [refresh])
+    let alive = true
+    api.schedulers.list().then(
+      (s) => alive && setSchedulers(s),
+      (e: Error) => alive && setError(e.message),
+    )
+    void fetchPlaylists((p, err) => {
+      if (!alive) return
+      setPlaylists(p)
+      setPlaylistsError(err)
+    })
+    return () => {
+      alive = false
+    }
+  }, [api, fetchPlaylists])
+
+  /** Re-fetch when opening the editor, so playlists made on YouTube meanwhile show up. */
+  const loadPlaylists = () => void fetchPlaylists(applyPlaylists)
+
+  const replace = (s: SchedulerView) =>
+    setSchedulers((list) => list?.map((x) => (x.id === s.id ? s : x)) ?? [s])
+
+  const run = async (action: () => Promise<void>) => {
+    setError(null)
+    try {
+      await action()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  const remove = (s: SchedulerView) =>
+    run(async () => {
+      if (
+        !window.confirm(
+          `Delete "${s.name}"? Its tracked channels and history are removed too. The playlist itself is not touched.`,
+        )
+      )
+        return
+      await api.schedulers.remove(s.id)
+      setSchedulers((list) => list?.filter((x) => x.id !== s.id) ?? [])
+    })
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -41,41 +90,60 @@ export function HomeScreen({
       />
       <main className="mx-auto w-full max-w-3xl flex-1 p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Your playlists</h2>
-          <Button variant="outline" size="sm" onClick={() => void refresh()}>
-            Refresh
+          <h2 className="text-xl font-semibold">Schedulers</h2>
+          <Button size="sm" onClick={() => setEditor({ mode: 'create' })}>
+            <Plus /> New scheduler
           </Button>
         </div>
-        <p className="mb-4 text-sm text-muted-foreground">
-          Schedulers will add new uploads to one of these (coming in the next milestones).
-        </p>
-        {load.state === 'loading' && <p className="text-sm text-muted-foreground">Loading…</p>}
-        {load.state === 'error' && (
-          <p role="alert" className="text-sm text-destructive">
-            Couldn&apos;t load playlists: {load.message}
+
+        {error && (
+          <p role="alert" className="mb-4 text-sm text-destructive">
+            {error}
           </p>
         )}
-        {load.state === 'done' && load.playlists.length === 0 && (
-          <p className="text-sm">No playlists yet. Create one on YouTube, then press Refresh.</p>
+        {schedulers === null && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {schedulers?.length === 0 && (
+          <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+            No schedulers yet. Create one to start filling a playlist automatically.
+          </p>
         )}
-        {load.state === 'done' && load.playlists.length > 0 && (
-          <ul className="divide-y rounded-lg border">
-            {load.playlists.map((p) => (
-              <li key={p.id} className="flex items-center gap-3 p-3">
-                {p.thumbnailUrl ? (
-                  <img src={p.thumbnailUrl} alt="" className="h-12 w-20 rounded object-cover" />
-                ) : (
-                  <span className="h-12 w-20 rounded bg-muted" />
-                )}
-                <span className="flex-1 font-medium">{p.title}</span>
-                <span className="text-sm text-muted-foreground">
-                  {p.itemCount} {p.itemCount === 1 ? 'video' : 'videos'}
-                </span>
-              </li>
+        {schedulers && schedulers.length > 0 && (
+          <ul className="grid gap-3">
+            {schedulers.map((s) => (
+              <SchedulerCard
+                key={s.id}
+                scheduler={s}
+                onToggle={(active) =>
+                  void run(async () => replace(await api.schedulers.setActive(s.id, active)))
+                }
+                onEdit={() => {
+                  loadPlaylists()
+                  setEditor({ mode: 'edit', scheduler: s })
+                }}
+                onDelete={() => void remove(s)}
+              />
             ))}
           </ul>
         )}
       </main>
+
+      {editor.mode !== 'closed' && (
+        <SchedulerEditor
+          editing={editor.mode === 'edit' ? editor.scheduler : undefined}
+          playlists={playlists}
+          playlistsError={playlistsError}
+          schedulers={schedulers ?? []}
+          onClose={() => setEditor({ mode: 'closed' })}
+          onSaved={(saved) => {
+            setSchedulers((list) =>
+              list?.some((x) => x.id === saved.id)
+                ? list.map((x) => (x.id === saved.id ? saved : x))
+                : [...(list ?? []), saved],
+            )
+            setEditor({ mode: 'closed' })
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -32,6 +32,13 @@ export function createApi(bridge: Bridge): Api {
     youtube: {
       listMyPlaylists: () => unwrap(bridge.youtube.listMyPlaylists()),
     },
+    schedulers: {
+      list: () => unwrap(bridge.schedulers.list()),
+      create: (input) => unwrap(bridge.schedulers.create(input)),
+      update: (id, input) => unwrap(bridge.schedulers.update(id, input)),
+      setActive: (id, active) => unwrap(bridge.schedulers.setActive(id, active)),
+      remove: (id) => unwrap(bridge.schedulers.remove(id)),
+    },
   }
 }
 

@@ -9,6 +9,8 @@ export type YouTubeErrorKind =
   | 'playlistFull'
   /** The video was deleted or made private. */
   | 'videoNotFound'
+  /** The signed-in Google account has no YouTube channel (so no playlists). */
+  | 'noChannel'
   /** Access token rejected, or the refresh token was revoked/expired (re-login needed). */
   | 'unauthorized'
   | 'forbidden'

@@ -6,4 +6,9 @@ export const IPC = {
   authSignOut: 'auth:signOut',
   authStatusChanged: 'auth:statusChanged',
   youtubeListMyPlaylists: 'youtube:listMyPlaylists',
+  schedulersList: 'schedulers:list',
+  schedulersCreate: 'schedulers:create',
+  schedulersUpdate: 'schedulers:update',
+  schedulersSetActive: 'schedulers:setActive',
+  schedulersRemove: 'schedulers:remove',
 } as const

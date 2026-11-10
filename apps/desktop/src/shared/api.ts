@@ -1,8 +1,32 @@
 // Types shared by main, preload and renderer. Type-only (plus type imports from
 // core) so every process can import them.
-import type { Playlist } from '@auto-yt/core'
+import type { Channel, Playlist } from '@auto-yt/core'
 
-export type { Playlist }
+export type { Channel, Playlist }
+
+/** What the editor sends to create or update a scheduler. */
+export interface SchedulerInput {
+  name: string
+  playlistId: string
+  /** Shown in the list without another API call. */
+  playlistTitle: string
+  /** 1–30. */
+  intervalDays: number
+  /** "HH:mm", 24-hour. */
+  timeOfDay: string
+  /** IANA zone, default "Asia/Kuala_Lumpur". */
+  timezone: string
+}
+
+/** A scheduler as the UI shows it. Dates are ISO strings. */
+export interface SchedulerView extends SchedulerInput {
+  id: string
+  active: boolean
+  createdAt: string
+  lastSuccessAt?: string
+  nextRunAt: string
+  channels: Channel[]
+}
 
 /** The signed-in Google account, for the header. */
 export interface Profile {
@@ -46,6 +70,14 @@ export interface Api {
   youtube: {
     listMyPlaylists(): Promise<Playlist[]>
   }
+  schedulers: {
+    list(): Promise<SchedulerView[]>
+    /** Rejects with kind "validation" and a readable message for bad input or a used playlist. */
+    create(input: SchedulerInput): Promise<SchedulerView>
+    update(id: string, input: SchedulerInput): Promise<SchedulerView>
+    setActive(id: string, active: boolean): Promise<SchedulerView>
+    remove(id: string): Promise<void>
+  }
 }
 
 /** Turn `() => Promise<T>` methods into `() => Promise<IpcResult<T>>`. */
@@ -60,4 +92,5 @@ export interface Bridge {
   versions: Api['versions']
   auth: Enveloped<Api['auth']>
   youtube: Enveloped<Api['youtube']>
+  schedulers: Enveloped<Api['schedulers']>
 }

@@ -4,7 +4,10 @@ import { IPC } from '../shared/ipc'
 
 // Results pass through as `IpcResult` envelopes; the renderer unwraps them
 // (errors thrown here would lose their `kind` crossing the contextBridge).
-const invoke = (channel: string) => () => ipcRenderer.invoke(channel)
+const invoke =
+  (channel: string) =>
+  (...args: unknown[]) =>
+    ipcRenderer.invoke(channel, ...args)
 
 const bridge: Bridge = {
   versions: {
@@ -25,6 +28,13 @@ const bridge: Bridge = {
   },
   youtube: {
     listMyPlaylists: invoke(IPC.youtubeListMyPlaylists),
+  },
+  schedulers: {
+    list: invoke(IPC.schedulersList),
+    create: invoke(IPC.schedulersCreate),
+    update: invoke(IPC.schedulersUpdate),
+    setActive: invoke(IPC.schedulersSetActive),
+    remove: invoke(IPC.schedulersRemove),
   },
 }
 

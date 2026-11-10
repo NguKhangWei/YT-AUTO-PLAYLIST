@@ -5,15 +5,22 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createEncryptedFileStore, type Cipher } from './token-store'
 
 /** Reversible fake "encryption" so tests can tell plaintext was not written. */
-const fakeCipher = (available = true): Cipher => ({
-  isEncryptionAvailable: () => available,
-  encryptString: (s) => Buffer.from(`enc:${Buffer.from(s).toString('base64')}`),
-  decryptString: (b) => {
-    const text = b.toString()
-    if (!text.startsWith('enc:')) throw new Error('bad ciphertext')
-    return Buffer.from(text.slice(4), 'base64').toString()
-  },
-})
+const fakeCipher = (available = true, rotated = false) => {
+  const encrypted: string[] = []
+  const cipher: Cipher = {
+    isAsyncEncryptionAvailable: async () => available,
+    encryptStringAsync: async (s) => {
+      encrypted.push(s)
+      return Buffer.from(`enc:${Buffer.from(s).toString('base64')}`)
+    },
+    decryptStringAsync: async (b) => {
+      const text = b.toString()
+      if (!text.startsWith('enc:')) throw new Error('bad ciphertext')
+      return { result: Buffer.from(text.slice(4), 'base64').toString(), shouldReEncrypt: rotated }
+    },
+  }
+  return Object.assign(cipher, { encrypted })
+}
 
 const auth = {
   refreshToken: '1//secret-refresh',
@@ -49,6 +56,13 @@ describe('createEncryptedFileStore', () => {
     const store = createEncryptedFileStore(join(dir, 'auth.bin'), fakeCipher())
     await writeFile(join(dir, 'auth.bin'), 'garbage')
     expect(await store.load()).toBeNull()
+  })
+
+  it('re-encrypts when the OS key was rotated', async () => {
+    await createEncryptedFileStore(file, fakeCipher()).save(auth)
+    const rotated = fakeCipher(true, true)
+    expect(await createEncryptedFileStore(file, rotated).load()).toEqual(auth)
+    expect(rotated.encrypted).toHaveLength(1)
   })
 
   it('refuses to save when OS encryption is unavailable', async () => {

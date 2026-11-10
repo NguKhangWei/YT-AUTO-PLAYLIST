@@ -12,6 +12,13 @@ const bridge = (over: Partial<Bridge['youtube']> = {}): Bridge => ({
     onStatusChange: vi.fn(() => () => undefined),
   },
   youtube: { listMyPlaylists: vi.fn(), ...over },
+  schedulers: {
+    list: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    setActive: vi.fn(),
+    remove: vi.fn(),
+  },
 })
 
 describe('createApi', () => {
