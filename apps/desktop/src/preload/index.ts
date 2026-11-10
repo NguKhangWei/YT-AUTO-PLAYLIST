@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AuthStatus, Bridge, QuotaStatus } from '../shared/api'
+import type { AppState, AuthStatus, Bridge, QuotaStatus } from '../shared/api'
 import { IPC } from '../shared/ipc'
 
 // Results pass through as `IpcResult` envelopes; the renderer unwraps them
@@ -58,6 +58,15 @@ const bridge: Bridge = {
   },
   debug: {
     lookback: invoke(IPC.debugLookback),
+  },
+  app: {
+    getState: invoke(IPC.appGetState),
+    setPaused: invoke(IPC.appSetPaused),
+    onStateChange(listener) {
+      const handler = (_e: unknown, state: AppState) => listener(state)
+      ipcRenderer.on(IPC.appStateChanged, handler)
+      return () => ipcRenderer.removeListener(IPC.appStateChanged, handler)
+    },
   },
 }
 

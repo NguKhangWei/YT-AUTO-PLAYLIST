@@ -6,6 +6,7 @@ import type { GoogleAuth } from './auth/google-auth'
 import type { ChannelService } from './channels'
 import type { QuotaTracker } from './quota'
 import type { Runner } from './runner'
+import type { SchedulerLoop } from './scheduler-loop'
 import type { SqliteStorage } from './db/sqlite-storage'
 import type { SchedulerService } from './schedulers'
 
@@ -58,12 +59,23 @@ export function registerIpc(deps: {
   quota: QuotaTracker
   runner: Runner
   storage: SqliteStorage
+  loop: Pick<SchedulerLoop, 'isPaused' | 'setPaused'>
+  /** A scheduler was created, edited, toggled or deleted (re-plan the next scan). */
+  onSchedulersChanged?: () => void
   /** Registers development-only handlers (debug lookback). */
   isDev: boolean
   now: () => Date
   getWindows: () => BrowserWindow[]
 }): void {
-  const { ipcMain, auth, youtube, schedulers, channels, quota, runner, storage } = deps
+  const { ipcMain, auth, youtube, schedulers, channels, quota, runner, storage, loop } = deps
+  /** Run a scheduler mutation, then tell the loop. */
+  const changed =
+    <A extends unknown[], T>(fn: (...args: A) => Promise<T>) =>
+    async (...args: A): Promise<T> => {
+      const result = await fn(...args)
+      deps.onSchedulersChanged?.()
+      return result
+    }
 
   ipcMain.handle(IPC.authGetStatus, wrap(auth.status))
   ipcMain.handle(IPC.authSignIn, wrap(auth.signIn))
@@ -86,20 +98,17 @@ export function registerIpc(deps: {
   ipcMain.handle(IPC.schedulersList, wrap(schedulers.list))
   ipcMain.handle(
     IPC.schedulersCreate,
-    wrap((input: SchedulerInput) => schedulers.create(input)),
+    wrap(changed((input: SchedulerInput) => schedulers.create(input))),
   )
   ipcMain.handle(
     IPC.schedulersUpdate,
-    wrap((id: string, input: SchedulerInput) => schedulers.update(id, input)),
+    wrap(changed((id: string, input: SchedulerInput) => schedulers.update(id, input))),
   )
   ipcMain.handle(
     IPC.schedulersSetActive,
-    wrap((id: string, active: boolean) => schedulers.setActive(id, active)),
+    wrap(changed((id: string, active: boolean) => schedulers.setActive(id, active))),
   )
-  ipcMain.handle(
-    IPC.schedulersRemove,
-    wrap((id: string) => schedulers.remove(id)),
-  )
+  ipcMain.handle(IPC.schedulersRemove, wrap(changed((id: string) => schedulers.remove(id))))
 
   ipcMain.handle(
     IPC.schedulersRunNow,
@@ -120,6 +129,18 @@ export function registerIpc(deps: {
       if (!deps.isDev) throw new Error('Debug lookback is only available in development.')
       const d = Math.min(30, Math.max(1, Math.floor(Number(days) || 7)))
       storage.debugLookback(String(id), new Date(deps.now().getTime() - d * 86_400_000))
+    }),
+  )
+
+  ipcMain.handle(
+    IPC.appGetState,
+    wrap(() => ({ paused: loop.isPaused() })),
+  )
+  ipcMain.handle(
+    IPC.appSetPaused,
+    wrap((paused: boolean) => {
+      loop.setPaused(paused === true)
+      return { paused: loop.isPaused() }
     }),
   )
 

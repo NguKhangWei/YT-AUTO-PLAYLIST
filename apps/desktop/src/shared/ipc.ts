@@ -18,4 +18,7 @@ export const IPC = {
   runsList: 'runs:list',
   runsChanged: 'runs:changed',
   debugLookback: 'debug:lookback',
+  appGetState: 'app:getState',
+  appSetPaused: 'app:setPaused',
+  appStateChanged: 'app:stateChanged',
 } as const

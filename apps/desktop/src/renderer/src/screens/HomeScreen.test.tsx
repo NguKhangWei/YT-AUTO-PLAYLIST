@@ -381,3 +381,29 @@ describe('playlist deleted on YouTube', () => {
     expect(screen.queryByText(/no longer exists/)).toBeNull()
   })
 })
+
+describe('pausing scheduled scans', () => {
+  it('pauses and resumes, with a banner while paused', async () => {
+    const { api } = renderHome({ schedulers: [view()] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause scans' }))
+    expect(await screen.findByText(/Scheduled scans are paused/)).toBeTruthy()
+    expect(api.app.setPaused).toHaveBeenCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume scans' }))
+    await waitFor(() => expect(screen.queryByText(/Scheduled scans are paused/)).toBeNull())
+    expect(api.app.setPaused).toHaveBeenLastCalledWith(false)
+  })
+
+  it('follows a pause made from the tray', async () => {
+    const fake = fakeApi(signedIn, { playlists, schedulers: [view()] })
+    render(
+      <ApiContext.Provider value={fake.api}>
+        <HomeScreen status={signedIn} onStatus={() => undefined} />
+      </ApiContext.Provider>,
+    )
+    await screen.findByRole('button', { name: 'Pause scans' })
+    act(() => fake.emitState({ paused: true }))
+    expect(await screen.findByText(/Scheduled scans are paused/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Resume scans' })).toBeTruthy()
+  })
+})

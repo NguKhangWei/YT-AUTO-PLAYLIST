@@ -168,6 +168,10 @@ export function createSqliteStorage(db: DatabaseSync) {
       'UPDATE scheduler_channels SET since_at = ? WHERE scheduler_id = ?',
     ),
     clearLastSuccess: db.prepare('UPDATE schedulers SET last_success_at = NULL WHERE id = ?'),
+    setNextRun: db.prepare('UPDATE schedulers SET next_run_at = ? WHERE id = ?'),
+    getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
+    putSetting: db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)
+      ON CONFLICT (key) DO UPDATE SET value = excluded.value`),
   }
 
   const scan: ScanStorage = {
@@ -297,6 +301,23 @@ export function createSqliteStorage(db: DatabaseSync) {
     debugLookback(schedulerId: string, since: Date): void {
       q.lookbackChannels.run(since.getTime(), schedulerId)
       q.clearLastSuccess.run(schedulerId)
+    },
+    /** Move only the next scan time (leaves concurrent edits to other columns alone). */
+    setNextRunAt(schedulerId: string, at: Date): void {
+      q.setNextRun.run(at.getTime(), schedulerId)
+    },
+    /** A JSON setting, or `fallback` when unset or unreadable. */
+    getSetting<T>(key: string, fallback: T): T {
+      const row = q.getSetting.get(key) as { value: string } | undefined
+      if (!row) return fallback
+      try {
+        return JSON.parse(row.value) as T
+      } catch {
+        return fallback
+      }
+    },
+    setSetting(key: string, value: unknown): void {
+      q.putSetting.run(key, JSON.stringify(value))
     },
     /** Run `fn` in a transaction (all or nothing). */
     transaction<T>(fn: () => T): T {

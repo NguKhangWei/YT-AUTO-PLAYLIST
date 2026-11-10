@@ -82,10 +82,13 @@ export function fakeApi(
     runs?: RunView[]
     /** What "Run now" resolves with (default: a successful run adding 2 videos). */
     runResult?: (schedulerId: string) => RunView
+    paused?: boolean
   } = {},
 ) {
   const listeners = new Set<(s: AuthStatus) => void>()
   const runListeners = new Set<() => void>()
+  const stateListeners = new Set<(s: { paused: boolean }) => void>()
+  let paused = opts.paused ?? false
   let runs = [...(opts.runs ?? [])]
   const quotaListeners = new Set<(s: QuotaStatus) => void>()
   let schedulers = [...(opts.schedulers ?? [])]
@@ -171,11 +174,23 @@ export function fakeApi(
     debug: {
       lookback: vi.fn(async () => undefined),
     },
+    app: {
+      getState: vi.fn(async () => ({ paused })),
+      setPaused: vi.fn(async (p: boolean) => {
+        paused = p
+        return { paused }
+      }),
+      onStateChange: vi.fn((l: (s: { paused: boolean }) => void) => {
+        stateListeners.add(l)
+        return () => stateListeners.delete(l)
+      }),
+    },
   } satisfies Api
   return {
     api,
     emit: (s: AuthStatus) => listeners.forEach((l) => l(s)),
     emitQuota: (q: QuotaStatus) => quotaListeners.forEach((l) => l(q)),
     emitRuns: () => runListeners.forEach((l) => l()),
+    emitState: (s: { paused: boolean }) => stateListeners.forEach((l) => l(s)),
   }
 }

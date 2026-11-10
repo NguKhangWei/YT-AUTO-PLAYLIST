@@ -24,6 +24,7 @@ const bridge = (over: Partial<Bridge['youtube']> = {}): Bridge => ({
   },
   runs: { list: vi.fn(), onChange: vi.fn(() => () => undefined) },
   debug: { lookback: vi.fn() },
+  app: { getState: vi.fn(), setPaused: vi.fn(), onStateChange: vi.fn(() => () => undefined) },
 })
 
 describe('createApi', () => {

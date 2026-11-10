@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react'
+import { Pause, Play, Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { AuthStatus, Playlist, SchedulerView } from '../../../shared/api'
 import { AccountHeader } from '@/components/AccountHeader'
@@ -6,6 +6,7 @@ import { RunHistory } from '@/components/RunHistory'
 import { SchedulerCard } from '@/components/SchedulerCard'
 import { SchedulerEditor } from '@/components/SchedulerEditor'
 import { Button } from '@/components/ui/button'
+import { useAppState } from '@/hooks/useAppState'
 import { useApi } from '@/lib/api'
 
 type Editor = { mode: 'closed' } | { mode: 'create' } | { mode: 'edit'; scheduler: SchedulerView }
@@ -32,6 +33,8 @@ export function HomeScreen({
   const [starting, setStarting] = useState<Set<string>>(() => new Set())
   const [notice, setNotice] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
+  const appState = useAppState()
+  const paused = appState.state?.paused ?? false
 
   /** Fetch playlists; `apply` receives the result so callers decide whether it's still wanted. */
   const fetchPlaylists = useCallback(
@@ -154,12 +157,31 @@ export function HomeScreen({
             ))}
           </div>
           {tab === 'schedulers' && (
-            <Button size="sm" onClick={() => setEditor({ mode: 'create' })}>
-              <Plus /> New scheduler
-            </Button>
+            <div className="flex gap-2">
+              {appState.state && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void run(() => appState.setPaused(!paused))}
+                >
+                  {paused ? <Play /> : <Pause />} {paused ? 'Resume scans' : 'Pause scans'}
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setEditor({ mode: 'create' })}>
+                <Plus /> New scheduler
+              </Button>
+            </div>
           )}
         </div>
 
+        {paused && (
+          <p
+            role="status"
+            className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+          >
+            Scheduled scans are paused. Run now still works. Missed scans run once when you resume.
+          </p>
+        )}
         {tab === 'history' && <RunHistory />}
         {tab === 'schedulers' && (
           <>

@@ -79,6 +79,13 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX runs_by_scheduler ON runs (scheduler_id, started_at DESC);
   CREATE INDEX runs_by_time ON runs (started_at DESC);
   `,
+  // 4: app settings (e.g. scans paused from the tray)
+  `
+  CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  ) STRICT;
+  `,
 ]
 
 /** Run pending migrations, each in its own transaction. */

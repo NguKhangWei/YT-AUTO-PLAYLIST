@@ -20,6 +20,12 @@ export interface SchedulerInput {
   channels: Channel[]
 }
 
+/** App-wide state shown in the UI. */
+export interface AppState {
+  /** Scheduled scans are paused (tray menu or the banner). Run now still works. */
+  paused: boolean
+}
+
 /** Result of the channel search box. */
 export interface ChannelSearchResult {
   /**
@@ -149,6 +155,12 @@ export interface Api {
     /** Pushed by main when a scan starts or finishes. Returns unsubscribe. */
     onChange(listener: () => void): () => void
   }
+  app: {
+    getState(): Promise<AppState>
+    setPaused(paused: boolean): Promise<AppState>
+    /** Pushed by main when the state changes (e.g. paused from the tray). Returns unsubscribe. */
+    onStateChange(listener: (state: AppState) => void): () => void
+  }
   debug: {
     /**
      * Development builds only: treat uploads from the last `days` days as new
@@ -175,4 +187,5 @@ export interface Bridge {
   schedulers: Enveloped<Api['schedulers']>
   runs: Enveloped<Api['runs']>
   debug: Enveloped<Api['debug']>
+  app: Enveloped<Api['app']>
 }

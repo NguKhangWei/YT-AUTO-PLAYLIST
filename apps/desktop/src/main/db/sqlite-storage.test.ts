@@ -230,3 +230,24 @@ describe('run history', () => {
     expect((await s.getScheduler('a'))?.lastSuccessAt).toBeUndefined()
   })
 })
+
+describe('settings and next run', () => {
+  it('stores JSON settings with a fallback', () => {
+    const s = createSqliteStorage(openDatabase(':memory:'))
+    expect(s.getSetting('paused', false)).toBe(false)
+    s.setSetting('paused', true)
+    expect(s.getSetting('paused', false)).toBe(true)
+    s.setSetting('paused', false)
+    expect(s.getSetting('paused', true)).toBe(false)
+  })
+
+  it('moves only the next run time', async () => {
+    const s = createSqliteStorage(openDatabase(':memory:'))
+    s.insertScheduler(contractScheduler('a', { name: 'Keep me' }))
+    s.setNextRunAt('a', new Date('2026-12-01T01:00:00Z'))
+    expect(await s.getScheduler('a')).toMatchObject({
+      name: 'Keep me',
+      nextRunAt: new Date('2026-12-01T01:00:00Z'),
+    })
+  })
+})

@@ -54,6 +54,11 @@ export function createApi(bridge: Bridge): Api {
     debug: {
       lookback: (id, days) => unwrap(bridge.debug.lookback(id, days)),
     },
+    app: {
+      getState: () => unwrap(bridge.app.getState()),
+      setPaused: (paused) => unwrap(bridge.app.setPaused(paused)),
+      onStateChange: (listener) => bridge.app.onStateChange(listener),
+    },
   }
 }
 
