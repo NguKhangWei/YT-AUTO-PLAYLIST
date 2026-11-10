@@ -1,9 +1,8 @@
-import type { Bridge } from '../../shared/api'
+import type { Api } from '../../shared/api'
 
 declare global {
   interface Window {
-    /** Exposed by the preload script; use `useApi()` instead of touching it directly. */
-    bridge?: Bridge
+    api?: Api // set by the preload script
   }
 }
 

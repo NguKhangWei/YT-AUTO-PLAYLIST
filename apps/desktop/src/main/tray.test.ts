@@ -1,5 +1,5 @@
-import { contractScheduler } from '@auto-yt/core/testing'
 import { describe, expect, it, vi } from 'vitest'
+import { scheduler } from './test/fixtures'
 import { trayMenu, trayTooltip } from './tray'
 
 const actions = () => ({
@@ -42,9 +42,9 @@ describe('trayTooltip', () => {
   it('names the next active scan in its own time zone', () => {
     const tip = trayTooltip(
       [
-        contractScheduler('a', { name: 'Later', nextRunAt: new Date('2026-11-12T01:00:00Z') }),
-        contractScheduler('b', { name: 'Off', active: false, nextRunAt: new Date(0) }),
-        contractScheduler('c', { name: 'Gaming', nextRunAt: new Date('2026-11-11T01:00:00Z') }),
+        scheduler('a', { name: 'Later', nextRunAt: new Date('2026-11-12T01:00:00Z') }),
+        scheduler('b', { name: 'Off', active: false, nextRunAt: new Date(0) }),
+        scheduler('c', { name: 'Gaming', nextRunAt: new Date('2026-11-11T01:00:00Z') }),
       ],
       false,
     )
@@ -57,7 +57,7 @@ describe('trayTooltip', () => {
   })
 
   it('stays within the Windows tooltip limit', () => {
-    const long = contractScheduler('a', { name: 'x'.repeat(200) })
+    const long = scheduler('a', { name: 'x'.repeat(200) })
     expect(trayTooltip([long], false).length).toBeLessThanOrEqual(127)
   })
 })

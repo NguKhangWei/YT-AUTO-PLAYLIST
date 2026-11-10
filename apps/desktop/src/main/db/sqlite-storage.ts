@@ -1,41 +1,28 @@
+// All reads and writes of the app's SQLite database.
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
-import type { Channel, ScanStorage, SchedulerRecord, TrackedChannel } from '@auto-yt/core'
 import type { RunDetails, RunStatus, RunView } from '../../shared/api'
+import type { Channel } from '../core/youtube/types'
 
-interface RunRow {
+export const MAX_RUNS = 500 // run history kept
+
+export interface SchedulerRecord {
   id: string
-  scheduler_id: string
-  scheduler_name: string
-  trigger: 'manual' | 'scheduled'
-  status: RunStatus
-  started_at: number
-  finished_at: number | null
-  added_count: number
-  error_kind: string | null
-  error_message: string | null
-  details_json: string | null
+  name: string
+  playlistId: string
+  playlistTitle: string
+  intervalDays: number
+  timeOfDay: string
+  timezone: string
+  active: boolean
+  createdAt: Date
+  lastSuccessAt?: Date // start of the last fully successful scan
+  nextRunAt: Date
 }
 
-const toRun = (r: RunRow): RunView => ({
-  id: r.id,
-  schedulerId: r.scheduler_id,
-  schedulerName: r.scheduler_name,
-  trigger: r.trigger,
-  status: r.status,
-  startedAt: new Date(r.started_at).toISOString(),
-  ...(r.finished_at !== null ? { finishedAt: new Date(r.finished_at).toISOString() } : {}),
-  addedCount: r.added_count,
-  ...(r.error_kind !== null
-    ? { error: { kind: r.error_kind, message: r.error_message ?? '' } }
-    : {}),
-  ...(r.details_json !== null ? { details: JSON.parse(r.details_json) as RunDetails } : {}),
-})
-
-const RUN_SELECT = `SELECT r.*, s.name AS scheduler_name FROM runs r
-  JOIN schedulers s ON s.id = r.scheduler_id`
-
-/** How many runs to keep in history (oldest are deleted). */
-export const MAX_RUNS = 500
+export interface TrackedChannel {
+  channel: Channel
+  sinceAt: Date // uploads before this don't count as new
+}
 
 interface SchedulerRow {
   id: string
@@ -59,6 +46,20 @@ interface TrackedRow {
   subscriber_count: number | null
   uploads_playlist_id: string
   since_at: number
+}
+
+interface RunRow {
+  id: string
+  scheduler_id: string
+  scheduler_name: string
+  trigger: 'manual' | 'scheduled'
+  status: RunStatus
+  started_at: number
+  finished_at: number | null
+  added_count: number
+  error_kind: string | null
+  error_message: string | null
+  details_json: string | null
 }
 
 const toScheduler = (r: SchedulerRow): SchedulerRecord => ({
@@ -87,6 +88,21 @@ const toTracked = (r: TrackedRow): TrackedChannel => ({
   sinceAt: new Date(r.since_at),
 })
 
+const toRun = (r: RunRow): RunView => ({
+  id: r.id,
+  schedulerId: r.scheduler_id,
+  schedulerName: r.scheduler_name,
+  trigger: r.trigger,
+  status: r.status,
+  startedAt: new Date(r.started_at).toISOString(),
+  ...(r.finished_at !== null ? { finishedAt: new Date(r.finished_at).toISOString() } : {}),
+  addedCount: r.added_count,
+  ...(r.error_kind !== null
+    ? { error: { kind: r.error_kind, message: r.error_message ?? '' } }
+    : {}),
+  ...(r.details_json !== null ? { details: JSON.parse(r.details_json) as RunDetails } : {}),
+})
+
 const schedulerParams = (s: SchedulerRecord): Record<string, SQLInputValue> => ({
   id: s.id,
   name: s.name,
@@ -101,7 +117,10 @@ const schedulerParams = (s: SchedulerRecord): Record<string, SQLInputValue> => (
   next_run_at: s.nextRunAt.getTime(),
 })
 
-/** SQLite-backed storage: the core `ScanStorage` plus scheduler/channel CRUD for the app. */
+const RUNS =
+  'SELECT r.*, s.name AS scheduler_name FROM runs r JOIN schedulers s ON s.id = r.scheduler_id'
+
+/** Wraps an open database in typed, synchronous accessors. */
 export function createSqliteStorage(db: DatabaseSync) {
   const q = {
     getScheduler: db.prepare('SELECT * FROM schedulers WHERE id = ?'),
@@ -121,6 +140,7 @@ export function createSqliteStorage(db: DatabaseSync) {
     findByPlaylist: db.prepare('SELECT id FROM schedulers WHERE playlist_id = ?'),
     setLastSuccess: db.prepare('UPDATE schedulers SET last_success_at = ? WHERE id = ?'),
     setActive: db.prepare('UPDATE schedulers SET active = ? WHERE id = ?'),
+    setNextRun: db.prepare('UPDATE schedulers SET next_run_at = ? WHERE id = ?'),
     upsertChannel: db.prepare(`
       INSERT INTO channels (channel_id, title, handle, thumbnail_url, subscriber_count, uploads_playlist_id)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -139,66 +159,30 @@ export function createSqliteStorage(db: DatabaseSync) {
     recordHandled: db.prepare(
       'INSERT OR IGNORE INTO handled_videos (scheduler_id, video_id, handled_at) VALUES (?, ?, ?)',
     ),
-    getCache: db.prepare('SELECT results_json, fetched_at FROM search_cache WHERE query = ?'),
-    putCache: db.prepare(`
-      INSERT INTO search_cache (query, results_json, fetched_at) VALUES (?, ?, ?)
-      ON CONFLICT (query) DO UPDATE SET results_json = excluded.results_json,
-        fetched_at = excluded.fetched_at`),
-    pruneCache: db.prepare('DELETE FROM search_cache WHERE fetched_at < ?'),
-    addQuota: db.prepare(`
-      INSERT INTO quota_usage (pt_date, units) VALUES (?, ?)
-      ON CONFLICT (pt_date) DO UPDATE SET units = units + excluded.units`),
-    getQuota: db.prepare('SELECT units FROM quota_usage WHERE pt_date = ?'),
-    pruneQuota: db.prepare('DELETE FROM quota_usage WHERE pt_date < ?'),
     insertRun: db.prepare(`INSERT INTO runs (id, scheduler_id, trigger, status, started_at)
       VALUES (?, ?, ?, 'running', ?)`),
     finishRun: db.prepare(`UPDATE runs SET status = :status, finished_at = :finished_at,
       added_count = :added_count, error_kind = :error_kind, error_message = :error_message,
       details_json = :details_json WHERE id = :id`),
-    listRuns: db.prepare(`${RUN_SELECT} ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`),
+    listRuns: db.prepare(`${RUNS} ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`),
     listRunsFor: db.prepare(
-      `${RUN_SELECT} WHERE r.scheduler_id = ? ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`,
+      `${RUNS} WHERE r.scheduler_id = ? ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`,
     ),
     interrupt: db.prepare(`UPDATE runs SET status = 'error', finished_at = ?,
       error_kind = 'interrupted', error_message = 'The app closed before this scan finished.'
       WHERE status = 'running'`),
     pruneRuns: db.prepare(`DELETE FROM runs WHERE id NOT IN
       (SELECT id FROM runs ORDER BY started_at DESC, rowid DESC LIMIT ?)`),
-    lookbackChannels: db.prepare(
-      'UPDATE scheduler_channels SET since_at = ? WHERE scheduler_id = ?',
-    ),
-    clearLastSuccess: db.prepare('UPDATE schedulers SET last_success_at = NULL WHERE id = ?'),
-    setNextRun: db.prepare('UPDATE schedulers SET next_run_at = ? WHERE id = ?'),
     getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
     putSetting: db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)
       ON CONFLICT (key) DO UPDATE SET value = excluded.value`),
   }
 
-  const scan: ScanStorage = {
-    async getScheduler(id) {
+  return {
+    getScheduler(id: string): SchedulerRecord | null {
       const row = q.getScheduler.get(id) as SchedulerRow | undefined
       return row ? toScheduler(row) : null
     },
-    async listTrackedChannels(schedulerId) {
-      return (q.listTracked.all(schedulerId) as unknown as TrackedRow[]).map(toTracked)
-    },
-    async listAddedVideoIds(schedulerId) {
-      const rows = q.listHandled.all(schedulerId) as { video_id: string }[]
-      return new Set(rows.map((r) => r.video_id))
-    },
-    async recordAddedVideo(schedulerId, videoId, at) {
-      q.recordHandled.run(schedulerId, videoId, at.getTime())
-    },
-    async setLastSuccessAt(schedulerId, at) {
-      q.setLastSuccess.run(at.getTime(), schedulerId)
-    },
-    async setActive(schedulerId, active) {
-      q.setActive.run(active ? 1 : 0, schedulerId)
-    },
-  }
-
-  return {
-    ...scan,
     listSchedulers(): SchedulerRecord[] {
       return (q.listSchedulers.all() as unknown as SchedulerRow[]).map(toScheduler)
     },
@@ -209,14 +193,27 @@ export function createSqliteStorage(db: DatabaseSync) {
     insertScheduler(s: SchedulerRecord): void {
       q.insertScheduler.run(schedulerParams(s))
     },
-    /** Replace every column of an existing scheduler. */
     saveScheduler(s: SchedulerRecord): void {
       q.updateScheduler.run(schedulerParams(s))
     },
-    /** Delete a scheduler with its channel links and history. */
+    /** Deletes a scheduler along with its channel links, history and runs. */
     deleteScheduler(id: string): void {
       q.deleteScheduler.run(id)
     },
+    setActive(schedulerId: string, active: boolean): void {
+      q.setActive.run(active ? 1 : 0, schedulerId)
+    },
+    setLastSuccessAt(schedulerId: string, at: Date): void {
+      q.setLastSuccess.run(at.getTime(), schedulerId)
+    },
+    setNextRunAt(schedulerId: string, at: Date): void {
+      q.setNextRun.run(at.getTime(), schedulerId)
+    },
+
+    listTrackedChannels(schedulerId: string): TrackedChannel[] {
+      return (q.listTracked.all(schedulerId) as unknown as TrackedRow[]).map(toTracked)
+    },
+    /** Tracks a channel (or updates its details), counting uploads from `sinceAt`. */
     trackChannel(schedulerId: string, channel: Channel, sinceAt: Date): void {
       q.upsertChannel.run(
         channel.id,
@@ -231,36 +228,25 @@ export function createSqliteStorage(db: DatabaseSync) {
     untrackChannel(schedulerId: string, channelId: string): void {
       q.untrack.run(schedulerId, channelId)
     },
-    /** Cached search results newer than `minFetchedAt`, or undefined. */
-    getCachedSearch(query: string, minFetchedAt: Date): Channel[] | undefined {
-      const row = q.getCache.get(query) as { results_json: string; fetched_at: number } | undefined
-      if (!row || row.fetched_at < minFetchedAt.getTime()) return undefined
-      return JSON.parse(row.results_json) as Channel[]
+
+    /** Videos a scheduler added, skipped for good, or found already in its playlist. */
+    listHandledVideoIds(schedulerId: string): Set<string> {
+      const rows = q.listHandled.all(schedulerId) as { video_id: string }[]
+      return new Set(rows.map((r) => r.video_id))
     },
-    /** Store search results and drop entries older than `pruneBefore`. */
-    putCachedSearch(query: string, channels: Channel[], at: Date, pruneBefore: Date): void {
-      q.putCache.run(query, JSON.stringify(channels), at.getTime())
-      q.pruneCache.run(pruneBefore.getTime())
+    recordHandledVideo(schedulerId: string, videoId: string, at: Date): void {
+      q.recordHandled.run(schedulerId, videoId, at.getTime())
     },
-    /** Add API units to a Pacific-time quota day ("yyyy-MM-dd"); keeps 30 days of history. */
-    addQuotaUnits(ptDate: string, units: number): void {
-      q.addQuota.run(ptDate, units)
-      const [y, m, d] = ptDate.split('-').map(Number) as [number, number, number]
-      q.pruneQuota.run(new Date(Date.UTC(y, m - 1, d - 30)).toISOString().slice(0, 10))
-    },
-    quotaUnitsUsed(ptDate: string): number {
-      return (q.getQuota.get(ptDate) as { units: number } | undefined)?.units ?? 0
-    },
-    /** Record that a scan started. */
+
     startRun(run: {
       id: string
       schedulerId: string
-      trigger: 'manual' | 'scheduled'
+      trigger: RunView['trigger']
       startedAt: Date
-    }): void {
+    }) {
       q.insertRun.run(run.id, run.schedulerId, run.trigger, run.startedAt.getTime())
     },
-    /** Record how a scan ended, and trim history to the newest MAX_RUNS. */
+    /** Records how a scan ended and trims history to the newest MAX_RUNS. */
     finishRun(
       id: string,
       r: {
@@ -282,7 +268,7 @@ export function createSqliteStorage(db: DatabaseSync) {
       })
       q.pruneRuns.run(MAX_RUNS)
     },
-    /** Newest first; all schedulers, or one. */
+    /** Runs newest first, for all schedulers or one. */
     listRuns(opts: { schedulerId?: string; limit?: number } = {}): RunView[] {
       const limit = opts.limit ?? 100
       const rows = opts.schedulerId
@@ -290,36 +276,20 @@ export function createSqliteStorage(db: DatabaseSync) {
         : q.listRuns.all(limit)
       return (rows as unknown as RunRow[]).map(toRun)
     },
-    /** Runs left "running" by a crash or quit are marked as interrupted. */
+    /** Marks runs left "running" by a quit or crash as interrupted. */
     markInterruptedRuns(at: Date): void {
       q.interrupt.run(at.getTime())
     },
-    /**
-     * Development aid: make every channel of a scheduler count uploads since
-     * `since`, and forget the last success so the cursor starts there.
-     */
-    debugLookback(schedulerId: string, since: Date): void {
-      q.lookbackChannels.run(since.getTime(), schedulerId)
-      q.clearLastSuccess.run(schedulerId)
-    },
-    /** Move only the next scan time (leaves concurrent edits to other columns alone). */
-    setNextRunAt(schedulerId: string, at: Date): void {
-      q.setNextRun.run(at.getTime(), schedulerId)
-    },
-    /** A JSON setting, or `fallback` when unset or unreadable. */
+
     getSetting<T>(key: string, fallback: T): T {
       const row = q.getSetting.get(key) as { value: string } | undefined
-      if (!row) return fallback
-      try {
-        return JSON.parse(row.value) as T
-      } catch {
-        return fallback
-      }
+      return row ? (JSON.parse(row.value) as T) : fallback
     },
     setSetting(key: string, value: unknown): void {
       q.putSetting.run(key, JSON.stringify(value))
     },
-    /** Run `fn` in a transaction (all or nothing). */
+
+    /** Runs `fn` in a transaction: all of its writes happen, or none. */
     transaction<T>(fn: () => T): T {
       db.exec('BEGIN')
       try {

@@ -83,7 +83,6 @@ Run `auto-yt-setup-<version>.exe`. It installs for your Windows user only, so no
 - **Closing the window** keeps auto-yt running in the tray (look under the **^** arrow). **Quit** is in the tray menu.
 - **Tray menu:** Open, **Pause scheduled scans**, **Start at login** (on by default), Quit. Hover the icon to see the next scan.
 - **History** tab: every scan, with the videos added (linked), what was skipped and why, and any errors.
-- **API meter** in the header: YouTube API units this app used today.
 
 ## YouTube API quota
 
@@ -129,7 +128,7 @@ The app only talks to Google and YouTube. **Sign out** revokes its access at Goo
 | `npm test`          | Tests only (`npm run test:watch` to watch)              |
 | `npm run build:win` | Build the Windows installer                             |
 
-- `packages/core` is the scan engine: schedule maths, the YouTube API client, the video filter and the scan algorithm. It uses no Electron or Node APIs, so it can also run elsewhere (e.g. a Cloudflare Worker).
-- `apps/desktop` is the Electron and React app: sign-in, SQLite storage, the scheduler loop, the tray and the UI.
+- `apps/desktop/src/main` is the Electron main process: sign-in, SQLite storage, the scheduler loop and the tray. `main/core` holds the scan engine (schedule maths, YouTube API client, video filter, scan).
+- `apps/desktop/src/renderer` is the React window. `apps/desktop/src/shared` holds the types and constants both sides use.
 
-In `npm run dev` there's a **Debug: look back 7 days** button on each scheduler. It treats the last week's uploads as new, so **Run now** has something to add.
+To test scans without waiting for new uploads, run `npm run debug:lookback -- "<scheduler name>" [days]` (default 7). It makes that scheduler treat recent uploads as new, so **Run now** has something to add.

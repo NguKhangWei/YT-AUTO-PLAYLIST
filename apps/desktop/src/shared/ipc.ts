@@ -1,14 +1,13 @@
-/** IPC channel names, shared by main and preload. */
+// IPC channel names shared by main and preload.
+
 export const IPC = {
   authGetStatus: 'auth:getStatus',
   authSignIn: 'auth:signIn',
   authCancelSignIn: 'auth:cancelSignIn',
   authSignOut: 'auth:signOut',
   authStatusChanged: 'auth:statusChanged',
-  youtubeListMyPlaylists: 'youtube:listMyPlaylists',
-  channelsSearch: 'channels:search',
-  quotaGet: 'quota:get',
-  quotaChanged: 'quota:changed',
+  listMyPlaylists: 'youtube:listMyPlaylists',
+  searchChannels: 'channels:search',
   schedulersList: 'schedulers:list',
   schedulersCreate: 'schedulers:create',
   schedulersUpdate: 'schedulers:update',
@@ -17,8 +16,7 @@ export const IPC = {
   schedulersRunNow: 'schedulers:runNow',
   runsList: 'runs:list',
   runsChanged: 'runs:changed',
-  debugLookback: 'debug:lookback',
-  appGetState: 'app:getState',
-  appSetPaused: 'app:setPaused',
-  appStateChanged: 'app:stateChanged',
+  scansIsPaused: 'scans:isPaused',
+  scansSetPaused: 'scans:setPaused',
+  scansPausedChanged: 'scans:pausedChanged',
 } as const

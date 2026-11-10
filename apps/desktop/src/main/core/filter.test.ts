@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { classifyVideo, filterRegularVideos, parseIsoDuration, type VideoDetails } from '../src'
+import { filterRegularVideos, parseIsoDuration } from './filter'
+import type { VideoDetails } from './youtube/types'
 
 const video = (over: Partial<VideoDetails> = {}): VideoDetails => ({
   id: 'v',
@@ -31,30 +32,19 @@ describe('parseIsoDuration', () => {
   })
 })
 
-describe('classifyVideo', () => {
-  it('flags live and upcoming broadcasts', () => {
-    expect(
-      classifyVideo(video({ liveBroadcastContent: 'live', hasLiveStreamingDetails: true })),
-    ).toBe('live')
-    expect(
-      classifyVideo(video({ liveBroadcastContent: 'upcoming', hasLiveStreamingDetails: true })),
-    ).toBe('upcoming')
-  })
-
-  it('flags finished livestreams and premieres by their liveStreamingDetails', () => {
-    expect(classifyVideo(video({ hasLiveStreamingDetails: true, durationSeconds: 7200 }))).toBe(
-      'livestream',
-    )
-  })
-
-  it('needs the Shorts probe only at 3 minutes or less', () => {
-    expect(classifyVideo(video({ durationSeconds: 180 }))).toBe('maybeShort')
-    expect(classifyVideo(video({ durationSeconds: 45 }))).toBe('maybeShort')
-    expect(classifyVideo(video({ durationSeconds: 181 }))).toBe('regular')
-  })
-})
-
 describe('filterRegularVideos', () => {
+  it('only asks the Shorts probe about videos of 3 minutes or less', async () => {
+    const isShort = vi.fn(async () => false)
+    await filterRegularVideos(
+      [
+        video({ id: 'at-limit', durationSeconds: 180 }),
+        video({ id: 'longer', durationSeconds: 181 }),
+      ],
+      isShort,
+    )
+    expect(isShort.mock.calls).toEqual([['at-limit']])
+  })
+
   it('keeps only regular videos and reports why others were skipped', async () => {
     const isShort = vi.fn(async (id: string) => id === 'short')
     const result = await filterRegularVideos(

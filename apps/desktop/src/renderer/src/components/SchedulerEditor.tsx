@@ -1,6 +1,12 @@
-import { DEFAULT_TIMEZONE, MAX_INTERVAL_DAYS, MIN_INTERVAL_DAYS } from '@auto-yt/core'
+// Dialog for creating or editing a scheduler.
 import { useId, useMemo, useState, type FormEvent } from 'react'
 import type { Playlist, SchedulerInput, SchedulerView } from '../../../shared/api'
+import {
+  DEFAULT_TIMEZONE,
+  MAX_INTERVAL_DAYS,
+  MAX_NAME_LENGTH,
+  MIN_INTERVAL_DAYS,
+} from '../../../shared/constants'
 import { ChannelPicker } from '@/components/ChannelPicker'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -24,17 +30,15 @@ const blank = (): SchedulerInput => ({
 })
 
 export interface SchedulerEditorProps {
-  /** The scheduler being edited, or undefined to create one. */
-  editing?: SchedulerView
-  playlists: Playlist[] | null
-  playlistsError?: string
-  /** All schedulers, to show which playlists are taken. */
-  schedulers: SchedulerView[]
+  editing?: SchedulerView // undefined when creating
+  playlists: Playlist[] | null // null while loading
+  playlistsError?: string | null
+  schedulers: SchedulerView[] // to show which playlists are taken
   onClose: () => void
   onSaved: (s: SchedulerView) => void
 }
 
-/** Create/edit dialog. Rendered only while open, so its form state resets each time. */
+/** Rendered only while open, so the form starts fresh each time. */
 export function SchedulerEditor(props: SchedulerEditorProps) {
   const { editing, playlists, schedulers } = props
   const api = useApi()
@@ -62,45 +66,17 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
     return m
   }, [schedulers, editing])
 
-  // The playlist list is authoritative once it has loaded: a playlist deleted on
-  // YouTube is not offered. Only while it is loading (or failed to load) is the
-  // current choice kept as an option, so the form doesn't lose it.
-  const listKnown = playlists !== null && !props.playlistsError
-  const options = useMemo(() => {
-    const list = playlists ?? []
-    if (!listKnown && form.playlistId && !list.some((p) => p.id === form.playlistId)) {
-      return [{ id: form.playlistId, title: form.playlistTitle, itemCount: 0 }, ...list]
-    }
-    return list
-  }, [playlists, listKnown, form.playlistId, form.playlistTitle])
+  const current = editing && { id: editing.playlistId, title: editing.playlistTitle, itemCount: 0 }
+  const options = playlists && !props.playlistsError ? playlists : current ? [current] : [] // keep the saved one until the list loads
   const selectedExists = options.some((p) => p.id === form.playlistId)
-  /** Set when the scheduler's saved playlist was deleted on YouTube and is still selected. */
-  const gone =
-    editing &&
-    listKnown &&
-    form.playlistId === editing.playlistId &&
-    !(playlists ?? []).some((p) => p.id === editing.playlistId)
-      ? editing
-      : undefined
 
   const set = <K extends keyof SchedulerInput>(key: K, value: SchedulerInput[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const problems: string[] = []
     if (!selectedExists) {
-      problems.push(
-        gone
-          ? `"${gone.playlistTitle}" no longer exists on YouTube. Choose another playlist.`
-          : 'Choose a playlist.',
-      )
-    }
-    if (!zones.includes(form.timezone)) {
-      problems.push(`Unknown time zone "${form.timezone}". Pick one from the list.`)
-    }
-    if (problems.length > 0) {
-      setError(problems.join(' '))
+      setError('Choose a playlist.') // e.g. the saved one was deleted on YouTube
       return
     }
     setSaving(true)
@@ -131,7 +107,7 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
             <Input
               id={`${ids}-name`}
               value={form.name}
-              maxLength={80}
+              maxLength={MAX_NAME_LENGTH}
               placeholder="e.g. Gaming"
               onChange={(e) => set('name', e.target.value)}
             />
@@ -151,7 +127,9 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
                 }))
               }}
             >
-              <option value="">{playlists ? 'Choose a playlist…' : 'Loading playlists…'}</option>
+              <option value="">
+                {playlists || props.playlistsError ? 'Choose a playlist…' : 'Loading playlists…'}
+              </option>
               {options.map((p) => {
                 const owner = takenBy.get(p.id)
                 return (
@@ -162,12 +140,6 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
                 )
               })}
             </NativeSelect>
-            {gone && (
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                &quot;{gone.playlistTitle}&quot; no longer exists on YouTube. Choose another
-                playlist.
-              </p>
-            )}
             {props.playlistsError && (
               <p className="text-xs text-destructive">
                 Couldn&apos;t load playlists: {props.playlistsError}

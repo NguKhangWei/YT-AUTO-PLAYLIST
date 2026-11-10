@@ -7,7 +7,6 @@
     "node": ">=24"
   },
   "workspaces": [
-    "packages/*",
     "apps/*"
   ],
   "scripts": {
@@ -19,7 +18,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
-    "build:win": "npm run build:win -w @auto-yt/desktop"
+    "build:win": "npm run build:win -w @auto-yt/desktop",
+    "debug:lookback": "node apps/desktop/scripts/debug-lookback.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,15 +1,11 @@
-import {
-  YouTubeApiError,
-  type ScanDeps,
-  type UploadItem,
-  type VideoDetails,
-  type YouTubeErrorKind,
-} from '@auto-yt/core'
-import { contractChannel, contractScheduler } from '@auto-yt/core/testing'
 import { describe, expect, it, vi } from 'vitest'
+import type { ScanDeps } from './core/scan'
+import { YouTubeApiError, type YouTubeErrorKind } from './core/youtube/errors'
+import type { UploadItem, VideoDetails } from './core/youtube/types'
 import { openDatabase } from './db/database'
 import { createSqliteStorage } from './db/sqlite-storage'
 import { createRunner } from './runner'
+import { scheduler, tracked } from './test/fixtures'
 
 const SINCE = new Date('2026-11-01T00:00:00Z')
 
@@ -67,15 +63,14 @@ function setup(
     storage,
     youtube: yt.client,
     isShort: yt.isShort,
-    quotaRemaining: () => 10_000,
     now: () => new Date('2026-11-10T02:00:00Z'),
     notify,
     onChange,
     log,
   })
   const addScheduler = (id: string, playlistId = `PL-${id}`) => {
-    storage.insertScheduler(contractScheduler(id, { playlistId, playlistTitle: `List ${id}` }))
-    const t = contractChannel('UC1', SINCE)
+    storage.insertScheduler(scheduler(id, { playlistId, playlistTitle: `List ${id}` }))
+    const t = tracked('UC1', SINCE)
     storage.trackChannel(id, t.channel, t.sinceAt)
   }
   return { storage, yt, notify, onChange, log, runner, addScheduler }
@@ -117,11 +112,9 @@ describe('runner', () => {
     }
     const p = t.runner.run('s1')
     await vi.waitFor(() => expect(t.storage.listRuns()[0]?.status).toBe('running'))
-    expect(t.runner.isQueued('s1')).toBe(true)
     release()
     await p
     expect(t.storage.listRuns()[0]?.status).toBe('ok')
-    expect(t.runner.isQueued('s1')).toBe(false)
   })
 
   it('does not notify when there was nothing new', async () => {
@@ -174,7 +167,6 @@ describe('runner', () => {
       isShort: async () => {
         throw new TypeError('boom')
       },
-      quotaRemaining: () => 10_000,
       now: () => new Date('2026-11-10T02:00:00Z'),
       notify: t.notify,
       onChange: t.onChange,
@@ -224,7 +216,7 @@ describe('runner', () => {
 
   it('rejects an unknown scheduler', async () => {
     const t = setup()
-    await expect(t.runner.run('nope')).rejects.toMatchObject({ kind: 'validation' })
+    await expect(t.runner.run('nope')).rejects.toThrow('no longer exists')
     expect(t.storage.listRuns()).toEqual([])
   })
 })

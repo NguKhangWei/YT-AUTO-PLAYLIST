@@ -1,4 +1,5 @@
-import { History, Pencil, Play, Trash2 } from 'lucide-react'
+// One scheduler in the list: schedule, last scan, channels and actions.
+import { Pencil, Play, Trash2 } from 'lucide-react'
 import type { SchedulerView } from '../../../shared/api'
 import { ChannelAvatar } from '@/components/ChannelAvatar'
 import { LastRunLine } from '@/components/RunSummary'
@@ -10,25 +11,18 @@ export function SchedulerCard({
   scheduler: s,
   now,
   running,
-  playlistMissing = false,
   onToggle,
   onEdit,
   onDelete,
   onRunNow,
-  onDebugLookback,
 }: {
   scheduler: SchedulerView
   now: Date
-  /** A scan of this scheduler is queued or in progress. */
-  running: boolean
-  /** The target playlist no longer exists on YouTube. */
-  playlistMissing?: boolean
+  running: boolean // queued or scanning
   onToggle: (active: boolean) => void
   onEdit: () => void
   onDelete: () => void
   onRunNow: () => void
-  /** Development builds only. */
-  onDebugLookback?: () => void
 }) {
   const noChannels = s.channels.length === 0
   return (
@@ -37,11 +31,6 @@ export function SchedulerCard({
         <div className="min-w-0">
           <h3 className="truncate font-semibold">{s.name}</h3>
           <p className="truncate text-sm text-muted-foreground">→ {s.playlistTitle}</p>
-          {playlistMissing && (
-            <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">
-              This playlist no longer exists on YouTube. Edit the scheduler to choose another.
-            </p>
-          )}
         </div>
         <label className="flex shrink-0 items-center gap-2 text-sm">
           {s.active ? 'Active' : 'Off'}
@@ -78,16 +67,6 @@ export function SchedulerCard({
       </dl>
 
       <div className="mt-3 flex flex-wrap justify-end gap-2">
-        {onDebugLookback && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onDebugLookback}
-            title="Development only: treat uploads from the last 7 days as new, then use Run now."
-          >
-            <History /> Debug: look back 7 days
-          </Button>
-        )}
         <Button
           variant="outline"
           size="sm"

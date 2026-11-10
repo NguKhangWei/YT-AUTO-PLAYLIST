@@ -1,4 +1,4 @@
-/** Shown when the Google OAuth client isn't configured in .env yet. */
+// Shown until the Google OAuth client is set in .env.
 export function SetupScreen() {
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-4 p-8">

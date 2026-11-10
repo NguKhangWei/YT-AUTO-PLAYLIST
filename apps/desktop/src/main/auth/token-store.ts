@@ -1,8 +1,8 @@
+// Keeps the Google refresh token in a file encrypted with the OS account (Electron safeStorage).
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Profile } from '../../shared/api'
 
-/** What survives a restart: the long-lived refresh token and who it belongs to. */
 export interface StoredAuth {
   refreshToken: string
   profile: Profile
@@ -14,14 +14,13 @@ export interface TokenStore {
   clear(): Promise<void>
 }
 
-/** Electron `safeStorage` (Windows DPAPI / macOS Keychain / libsecret), injectable for tests. */
 export interface Cipher {
   isAsyncEncryptionAvailable(): Promise<boolean>
   encryptStringAsync(plain: string): Promise<Buffer>
   decryptStringAsync(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
-/** Stores auth as one encrypted file. A missing or unreadable file means "signed out". */
+/** A token store backed by one encrypted file; a missing or unreadable file means signed out. */
 export function createEncryptedFileStore(filePath: string, cipher: Cipher): TokenStore {
   const store: TokenStore = {
     async load() {
@@ -31,20 +30,15 @@ export function createEncryptedFileStore(filePath: string, cipher: Cipher): Toke
       } catch {
         return null
       }
-      let auth: StoredAuth
-      let reEncrypt: boolean
       try {
         const { result, shouldReEncrypt } = await cipher.decryptStringAsync(data)
-        const parsed = JSON.parse(result) as Partial<StoredAuth>
-        if (typeof parsed.refreshToken !== 'string' || !parsed.profile) return null
-        auth = parsed as StoredAuth
-        reEncrypt = shouldReEncrypt
+        const auth = JSON.parse(result) as Partial<StoredAuth>
+        if (typeof auth.refreshToken !== 'string' || !auth.profile) return null
+        if (shouldReEncrypt) await store.save(auth as StoredAuth).catch(() => undefined) // OS key rotated
+        return auth as StoredAuth
       } catch {
         return null // corrupted, or encrypted by another OS user
       }
-      // The OS key was rotated: store it again under the new key.
-      if (reEncrypt) await store.save(auth).catch(() => undefined)
-      return auth
     },
     async save(auth) {
       if (!(await cipher.isAsyncEncryptionAvailable())) {

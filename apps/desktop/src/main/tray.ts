@@ -1,11 +1,12 @@
-import type { SchedulerRecord } from '@auto-yt/core'
+// The tray menu and its hover text.
 import type { MenuItemConstructorOptions } from 'electron'
+import { formatInZone } from '../shared/format'
+import type { SchedulerRecord } from './db/sqlite-storage'
 
 export interface TrayState {
   paused: boolean
   openAtLogin: boolean
-  /** Start-at-login only works for the installed app, not `npm run dev`. */
-  canOpenAtLogin: boolean
+  canOpenAtLogin: boolean // only the installed app, not `npm run dev`
 }
 
 export interface TrayActions {
@@ -37,22 +38,13 @@ export function trayMenu(state: TrayState, actions: TrayActions): MenuItemConstr
   ]
 }
 
-/** Hover text, e.g. "auto-yt · next scan: Gaming, Wed 11 Nov, 09:00". */
+/** E.g. "auto-yt · next scan: Gaming, Wed 11 Nov, 09:00". */
 export function trayTooltip(schedulers: SchedulerRecord[], paused: boolean): string {
   if (paused) return 'auto-yt · scheduled scans paused'
   const next = schedulers
     .filter((s) => s.active)
     .sort((a, b) => a.nextRunAt.getTime() - b.nextRunAt.getTime())[0]
   if (!next) return 'auto-yt · no active schedulers'
-  const when = new Intl.DateTimeFormat('en-GB', {
-    timeZone: next.timezone,
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).format(next.nextRunAt)
-  // Windows truncates tray tooltips at 127 characters.
-  return `auto-yt · next scan: ${next.name}, ${when}`.slice(0, 127)
+  const text = `auto-yt · next scan: ${next.name}, ${formatInZone(next.nextRunAt, next.timezone)}`
+  return text.slice(0, 127) // Windows' tooltip limit
 }

@@ -1,21 +1,9 @@
-import {
-  describeScanStorageContract,
-  contractChannel,
-  contractScheduler,
-} from '@auto-yt/core/testing'
 import { describe, expect, it } from 'vitest'
+import { scheduler, tracked } from '../test/fixtures'
 import { MIGRATIONS, migrate, openDatabase } from './database'
 import { createSqliteStorage } from './sqlite-storage'
 
-// Same behaviour as the in-memory reference storage.
-describeScanStorageContract('sqlite', () => {
-  const storage = createSqliteStorage(openDatabase(':memory:'))
-  return {
-    storage,
-    putScheduler: (s) => storage.insertScheduler(s),
-    trackChannel: (id, t) => storage.trackChannel(id, t.channel, t.sinceAt),
-  }
-})
+const setup = () => createSqliteStorage(openDatabase(':memory:'))
 
 describe('migrations', () => {
   it('brings a new database to the latest version and is idempotent', () => {
@@ -35,27 +23,25 @@ describe('migrations', () => {
 })
 
 describe('sqlite storage', () => {
-  const setup = () => createSqliteStorage(openDatabase(':memory:'))
-
   it('enforces one scheduler per playlist', () => {
     const s = setup()
-    s.insertScheduler(contractScheduler('a', { playlistId: 'PL1' }))
+    s.insertScheduler(scheduler('a', { playlistId: 'PL1' }))
     expect(s.schedulerIdForPlaylist('PL1')).toBe('a')
     expect(s.schedulerIdForPlaylist('PL2')).toBeUndefined()
-    expect(() => s.insertScheduler(contractScheduler('b', { playlistId: 'PL1' }))).toThrow(
+    expect(() => s.insertScheduler(scheduler('b', { playlistId: 'PL1' }))).toThrow(
       /UNIQUE constraint failed: schedulers.playlist_id/,
     )
   })
 
   it('rejects intervals outside 1–30 days at the database level', () => {
     const s = setup()
-    expect(() => s.insertScheduler(contractScheduler('a', { intervalDays: 31 }))).toThrow(/CHECK/)
+    expect(() => s.insertScheduler(scheduler('a', { intervalDays: 31 }))).toThrow(/CHECK/)
   })
 
   it('lists schedulers oldest first and saves edits', () => {
     const s = setup()
-    s.insertScheduler(contractScheduler('b', { playlistId: 'PL-b', createdAt: new Date(2000) }))
-    s.insertScheduler(contractScheduler('a', { playlistId: 'PL-a', createdAt: new Date(1000) }))
+    s.insertScheduler(scheduler('b', { playlistId: 'PL-b', createdAt: new Date(2000) }))
+    s.insertScheduler(scheduler('a', { playlistId: 'PL-a', createdAt: new Date(1000) }))
     expect(s.listSchedulers().map((x) => x.id)).toEqual(['a', 'b'])
 
     const edited = { ...s.listSchedulers()[0]!, name: 'Renamed', intervalDays: 7 }
@@ -65,20 +51,20 @@ describe('sqlite storage', () => {
 
   it('deletes a scheduler with its channel links and history', async () => {
     const s = setup()
-    s.insertScheduler(contractScheduler('a'))
-    const t = contractChannel('UC1')
+    s.insertScheduler(scheduler('a'))
+    const t = tracked('UC1')
     s.trackChannel('a', t.channel, t.sinceAt)
-    await s.recordAddedVideo('a', 'v1', new Date())
+    await s.recordHandledVideo('a', 'v1', new Date())
     s.deleteScheduler('a')
     expect(await s.getScheduler('a')).toBeNull()
     expect(await s.listTrackedChannels('a')).toEqual([])
-    expect(await s.listAddedVideoIds('a')).toEqual(new Set())
+    expect(await s.listHandledVideoIds('a')).toEqual(new Set())
   })
 
   it('keeps channel details up to date and untracks', async () => {
     const s = setup()
-    s.insertScheduler(contractScheduler('a'))
-    const { channel } = contractChannel('UC1')
+    s.insertScheduler(scheduler('a'))
+    const { channel } = tracked('UC1')
     s.trackChannel('a', channel, new Date(1000))
     s.trackChannel('a', { ...channel, title: 'New name', subscriberCount: 5 }, new Date(2000))
     expect(await s.listTrackedChannels('a')).toEqual([
@@ -88,43 +74,25 @@ describe('sqlite storage', () => {
     expect(await s.listTrackedChannels('a')).toEqual([])
   })
 
+  it('records handled videos per scheduler, idempotently', () => {
+    const s = setup()
+    s.insertScheduler(scheduler('a'))
+    s.insertScheduler(scheduler('b'))
+    s.recordHandledVideo('a', 'v1', new Date())
+    s.recordHandledVideo('a', 'v1', new Date())
+    expect(s.listHandledVideoIds('a')).toEqual(new Set(['v1']))
+    expect(s.listHandledVideoIds('b')).toEqual(new Set())
+  })
+
   it('rolls back a failed transaction', () => {
     const s = setup()
     expect(() =>
       s.transaction(() => {
-        s.insertScheduler(contractScheduler('a', { playlistId: 'PL1' }))
-        s.insertScheduler(contractScheduler('b', { playlistId: 'PL1' }))
+        s.insertScheduler(scheduler('a', { playlistId: 'PL1' }))
+        s.insertScheduler(scheduler('b', { playlistId: 'PL1' }))
       }),
     ).toThrow()
     expect(s.listSchedulers()).toEqual([])
-  })
-})
-
-describe('search cache', () => {
-  const ch = contractChannel('UC1').channel
-
-  it('returns fresh entries only, and prunes old ones on write', () => {
-    const s = createSqliteStorage(openDatabase(':memory:'))
-    s.putCachedSearch('linus', [ch], new Date(1000), new Date(0))
-    expect(s.getCachedSearch('linus', new Date(500))).toEqual([ch])
-    expect(s.getCachedSearch('linus', new Date(1001))).toBeUndefined()
-    expect(s.getCachedSearch('other', new Date(0))).toBeUndefined()
-
-    s.putCachedSearch('new', [], new Date(5000), new Date(2000)) // prunes 'linus'
-    expect(s.getCachedSearch('linus', new Date(0))).toBeUndefined()
-    expect(s.getCachedSearch('new', new Date(0))).toEqual([])
-  })
-})
-
-describe('quota usage', () => {
-  it('sums units per day and forgets days older than 30', () => {
-    const s = createSqliteStorage(openDatabase(':memory:'))
-    s.addQuotaUnits('2026-10-01', 7)
-    s.addQuotaUnits('2026-11-10', 100)
-    s.addQuotaUnits('2026-11-10', 50)
-    expect(s.quotaUnitsUsed('2026-11-10')).toBe(150)
-    expect(s.quotaUnitsUsed('2026-11-11')).toBe(0)
-    expect(s.quotaUnitsUsed('2026-10-01')).toBe(0) // pruned by the Nov 10 write
   })
 })
 
@@ -142,15 +110,15 @@ describe('upgrading an existing database', () => {
     migrate(db)
     const s = createSqliteStorage(db)
     expect((await s.getScheduler('old'))?.name).toBe('Scheduler old')
-    expect(s.quotaUnitsUsed('2026-11-10')).toBe(0) // v2 tables exist
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: MIGRATIONS.length })
   })
 })
 
 describe('run history', () => {
   const setup = () => {
     const s = createSqliteStorage(openDatabase(':memory:'))
-    s.insertScheduler(contractScheduler('a', { playlistId: 'PL-a', name: 'A' }))
-    s.insertScheduler(contractScheduler('b', { playlistId: 'PL-b', name: 'B' }))
+    s.insertScheduler(scheduler('a', { playlistId: 'PL-a', name: 'A' }))
+    s.insertScheduler(scheduler('b', { playlistId: 'PL-b', name: 'B' }))
     return s
   }
 
@@ -219,16 +187,6 @@ describe('run history', () => {
     s.deleteScheduler('a')
     expect(s.listRuns()).toEqual([])
   })
-
-  it('debug lookback moves every channel start back and clears the last success', async () => {
-    const s = setup()
-    const t = contractChannel('UC1', new Date('2026-11-10T00:00:00Z'))
-    s.trackChannel('a', t.channel, t.sinceAt)
-    await s.setLastSuccessAt('a', new Date('2026-11-10T01:00:00Z'))
-    s.debugLookback('a', new Date('2026-11-03T00:00:00Z'))
-    expect((await s.listTrackedChannels('a'))[0]?.sinceAt).toEqual(new Date('2026-11-03T00:00:00Z'))
-    expect((await s.getScheduler('a'))?.lastSuccessAt).toBeUndefined()
-  })
 })
 
 describe('settings and next run', () => {
@@ -243,7 +201,7 @@ describe('settings and next run', () => {
 
   it('moves only the next run time', async () => {
     const s = createSqliteStorage(openDatabase(':memory:'))
-    s.insertScheduler(contractScheduler('a', { name: 'Keep me' }))
+    s.insertScheduler(scheduler('a', { name: 'Keep me' }))
     s.setNextRunAt('a', new Date('2026-12-01T01:00:00Z'))
     expect(await s.getScheduler('a')).toMatchObject({
       name: 'Keep me',

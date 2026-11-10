@@ -1,7 +1,8 @@
-import { createServer, type Server } from 'node:http'
+// Google sign-in for a desktop app: system browser, loopback redirect and PKCE.
+import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { YouTubeApiError } from '@auto-yt/core'
 import type { AuthStatus, Profile } from '../../shared/api'
+import { YouTubeApiError } from '../core/youtube/errors'
 import {
   GOOGLE_REVOKE_URL,
   GOOGLE_TOKEN_URL,
@@ -14,26 +15,16 @@ import {
 import type { TokenStore } from './token-store'
 
 export interface GoogleAuthOptions {
-  /** Undefined when .env isn't filled in yet; the app then shows setup instructions. */
-  clientId?: string
+  clientId?: string // unset until .env is filled in
   clientSecret?: string
   store: TokenStore
-  /** Opens the consent page in the system browser (Electron `shell.openExternal`). */
   openExternal: (url: string) => Promise<void>
-  /** For Google token/userinfo/revoke calls. Defaults to global fetch. */
   fetch?: typeof fetch
   now?: () => number
-  /** How long to wait for the browser before giving up. Default 5 minutes. */
-  timeoutMs?: number
+  timeoutMs?: number // default 5 minutes
 }
 
-/** Refresh this long before the access token actually expires. */
-const EXPIRY_SKEW_MS = 60_000
-
-const PAGE = (title: string, body: string) =>
-  `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
-  `<body style="font-family:system-ui;display:grid;place-items:center;height:90vh;margin:0">` +
-  `<div style="text-align:center"><h2>${title}</h2><p>${body}</p></div>`
+const EXPIRY_SKEW_MS = 60_000 // refresh a minute before the token expires
 
 interface TokenResponse {
   access_token?: string
@@ -43,10 +34,15 @@ interface TokenResponse {
   error_description?: string
 }
 
+const page = (title: string, body: string) =>
+  `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+  `<body style="font-family:system-ui;display:grid;place-items:center;height:90vh;margin:0">` +
+  `<div style="text-align:center"><h2>${title}</h2><p>${body}</p></div>`
+
 /**
- * Google OAuth for an installed app: system browser + loopback redirect
- * (127.0.0.1, random port) + PKCE. Embedded Electron windows are refused by
- * Google, so the browser is the only supported way.
+ * Creates the sign-in service. Google refuses sign-in inside embedded
+ * windows, so consent happens in the browser and comes back to a one-off
+ * server on 127.0.0.1.
  */
 export function createGoogleAuth(opts: GoogleAuthOptions) {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis)
@@ -72,6 +68,13 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
   async function emit(): Promise<void> {
     const s = await status()
     for (const l of listeners) l(s)
+  }
+
+  function cache(tokens: TokenResponse): void {
+    cached = {
+      token: tokens.access_token!,
+      expiresAt: now() + (tokens.expires_in ?? 3600) * 1000,
+    }
   }
 
   async function postToken(
@@ -107,13 +110,12 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
     }
   }
 
-  /** Listen on 127.0.0.1:<random> and resolve with the auth code from the redirect. */
+  /** Listens on a random 127.0.0.1 port and resolves `code` with the code from the redirect. */
   function startLoopback(state: string) {
     let settle!: { resolve: (code: string) => void; reject: (e: Error) => void }
     const code = new Promise<string>((resolve, reject) => (settle = { resolve, reject }))
-    // Cancel/timeout can reject before runSignIn awaits `code`; don't report that as unhandled.
-    code.catch(() => undefined)
-    const server: Server = createServer((req, res) => {
+    code.catch(() => undefined) // a cancel can reject before anyone awaits `code`
+    const server = createServer((req, res) => {
       const result = parseCallback(req.url ?? '/', state)
       if (result.kind === 'ignore') {
         res.writeHead(404).end()
@@ -121,14 +123,14 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       if (result.kind === 'code') {
-        res.end(PAGE('Signed in to auto-yt', 'You can close this tab and return to the app.'))
+        res.end(page('Signed in to auto-yt', 'You can close this tab and return to the app.'))
         settle.resolve(result.code)
       } else {
-        res.end(PAGE('Sign-in failed', result.message))
+        res.end(page('Sign-in failed', result.message))
         settle.reject(new Error(result.message))
       }
     })
-    const listening = new Promise<number>((resolve, reject) => {
+    const port = new Promise<number>((resolve, reject) => {
       server.once('error', reject)
       server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
     })
@@ -136,38 +138,34 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
       server.closeAllConnections()
       server.close()
     }
-    return { listening, code, close, fail: (e: Error) => settle.reject(e) }
+    return { port, code, close, fail: (e: Error) => settle.reject(e) }
   }
 
   async function runSignIn(loopback: ReturnType<typeof startLoopback>, state: string) {
-    const port = await loopback.listening
-    const redirectUri = `http://127.0.0.1:${port}`
+    const redirectUri = `http://127.0.0.1:${await loopback.port}`
     const { verifier, challenge } = createPkcePair()
     await opts.openExternal(
       buildAuthUrl({ clientId: opts.clientId!, redirectUri, challenge, state }),
     )
-    const code = await loopback.code
-
     const tokens = await postToken({
       grant_type: 'authorization_code',
-      code,
+      code: await loopback.code,
       code_verifier: verifier,
       redirect_uri: redirectUri,
     })
     if (!tokens.access_token || !tokens.refresh_token) {
-      throw new Error(
-        `Google did not issue tokens: ${tokens.error_description ?? tokens.error ?? `HTTP ${tokens.status}`}`,
-      )
+      const why = tokens.error_description ?? tokens.error ?? `HTTP ${tokens.status}`
+      throw new Error(`Google did not issue tokens: ${why}`)
     }
     const profile = await fetchProfile(tokens.access_token)
     await opts.store.save({ refreshToken: tokens.refresh_token, profile })
-    cached = { token: tokens.access_token, expiresAt: now() + (tokens.expires_in ?? 3600) * 1000 }
+    cache(tokens)
   }
 
   return {
     status,
 
-    /** Open the browser and wait for consent. Concurrent calls share one flow. */
+    /** Opens the browser and waits for consent; concurrent calls share one sign-in. */
     signIn(): Promise<AuthStatus> {
       if (!configured) {
         return Promise.reject(new Error('Google client ID/secret are not set. See README → Setup.'))
@@ -184,7 +182,7 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
         .finally(() => {
           clearTimeout(timer)
           loopback.close()
-          signInFlow = null // before status(), so the result says signingIn: false
+          signInFlow = null // cleared before status(), so the result isn't "signing in"
           void emit()
         })
         .then(status)
@@ -197,7 +195,7 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
       signInFlow?.cancel()
     },
 
-    /** Revoke the grant at Google (best effort) and forget it locally. */
+    /** Revokes access at Google (best effort) and forgets the sign-in. */
     async signOut(): Promise<AuthStatus> {
       const saved = await opts.store.load()
       cached = null
@@ -213,10 +211,8 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
     },
 
     /**
-     * A valid access token for API calls (the core YouTube client's
-     * `getAccessToken`). Refreshes when expired or when `forceRefresh` is set.
-     * If Google rejects the refresh token (revoked, expired), signs out and
-     * throws `YouTubeApiError('unauthorized')`.
+     * A valid access token, refreshed when expired or forced. Concurrent callers
+     * share one refresh. A revoked sign-in signs out and throws 'unauthorized'.
      */
     async getAccessToken(o?: { forceRefresh?: boolean }): Promise<string> {
       if (!o?.forceRefresh && cached && cached.expiresAt - EXPIRY_SKEW_MS > now()) {
@@ -236,25 +232,15 @@ export function createGoogleAuth(opts: GoogleAuthOptions) {
           throw new YouTubeApiError(
             'unauthorized',
             'Your Google sign-in expired or was revoked. Please sign in again.',
-            tokens.status,
-            'invalid_grant',
           )
         }
         if (!tokens.access_token) {
-          throw new YouTubeApiError(
-            'unknown',
-            `Could not refresh Google sign-in: ${tokens.error_description ?? tokens.error ?? `HTTP ${tokens.status}`}`,
-            tokens.status,
-          )
+          const why = tokens.error_description ?? tokens.error ?? `HTTP ${tokens.status}`
+          throw new YouTubeApiError('unknown', `Could not refresh Google sign-in: ${why}`)
         }
-        cached = {
-          token: tokens.access_token,
-          expiresAt: now() + (tokens.expires_in ?? 3600) * 1000,
-        }
+        cache(tokens)
         return tokens.access_token
-      })().finally(() => {
-        refreshing = null
-      })
+      })().finally(() => (refreshing = null))
       return refreshing
     },
 

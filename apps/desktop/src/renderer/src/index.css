@@ -2,9 +2,7 @@
 
 /* shadcn/ui "neutral" theme tokens */
 :root {
-  /* Tells Chromium which palette to use for native UI it draws itself: <select>
-     popups, the time picker and its icon, datalist suggestions, scrollbars. */
-  color-scheme: light;
+  color-scheme: light; /* palette for native popups, pickers and scrollbars */
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -82,7 +80,6 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
-  /* Native <select> popups: theme colours, so options never inherit light text on a light list. */
   option,
   optgroup {
     background-color: var(--popover);

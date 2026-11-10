@@ -1,5 +1,5 @@
+// Top bar with the signed-in account and Sign out.
 import type { Profile } from '../../../shared/api'
-import { QuotaMeter } from '@/components/QuotaMeter'
 import { Button } from '@/components/ui/button'
 
 export function AccountHeader({
@@ -14,7 +14,6 @@ export function AccountHeader({
     <header className="flex items-center justify-between border-b px-6 py-3">
       <span className="text-lg font-semibold tracking-tight">auto-yt</span>
       <div className="flex items-center gap-3">
-        <QuotaMeter />
         {profile?.pictureUrl ? (
           <img
             src={profile.pictureUrl}

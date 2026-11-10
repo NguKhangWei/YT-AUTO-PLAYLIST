@@ -14,7 +14,6 @@ const base = (over: Partial<RunView> = {}): RunView => ({
     added: [],
     skipped: [],
     unavailableChannels: [],
-    quotaWarning: false,
     deactivated: false,
   },
   ...over,

@@ -1,32 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  MAX_UPLOAD_PAGES,
-  YouTubeApiError,
-  createYouTubeClient,
-  isShortVideo,
-  type ApiMethod,
-} from '../src'
-import {
-  fakeFetch,
   googleError,
   rawChannel,
+  stubFetch,
   type FakeReply,
   type RecordedRequest,
-} from './helpers/fakeFetch'
+} from '../../test/fakeFetch'
+import { createYouTubeClient, isShortVideo } from './client'
+import { YouTubeApiError } from './errors'
 
 function setup(handler: (req: RecordedRequest, i: number) => FakeReply) {
-  const f = fakeFetch(handler)
-  const quota: [number, ApiMethod][] = []
+  const requests = stubFetch(handler)
   const getAccessToken = vi.fn(async (opts?: { forceRefresh?: boolean }) =>
     opts?.forceRefresh ? 'fresh-token' : 'token',
   )
-  const client = createYouTubeClient({
-    fetch: f.fetch,
-    getAccessToken,
-    onQuota: (units, method) => quota.push([units, method]),
-  })
-  const units = () => quota.reduce((sum, [u]) => sum + u, 0)
-  return { client, requests: f.requests, quota, units, getAccessToken }
+  return { client: createYouTubeClient({ getAccessToken }), requests, getAccessToken }
 }
 
 const ids = (n: number, prefix = 'v') => Array.from({ length: n }, (_, i) => `${prefix}${i}`)
@@ -48,7 +36,7 @@ describe('requests', () => {
 
 describe('searchChannels', () => {
   it('searches channels, then fetches their details, keeping search order', async () => {
-    const { client, requests, units } = setup((req) =>
+    const { client, requests } = setup((req) =>
       req.url.pathname.endsWith('/search')
         ? { body: { items: [{ id: { channelId: 'UCb' } }, { id: { channelId: 'UCa' } }] } }
         : { body: { items: [rawChannel('UCa'), rawChannel('UCb')] } },
@@ -68,14 +56,12 @@ describe('searchChannels', () => {
       subscriberCount: 1234,
       uploadsPlaylistId: 'UUb',
     })
-    expect(units()).toBe(101) // search 100 + channels 1
   })
 
   it('skips the details call when nothing matches', async () => {
-    const { client, requests, units } = setup(() => ({ body: { items: [] } }))
+    const { client, requests } = setup(() => ({ body: { items: [] } }))
     expect(await client.searchChannels('zzzz')).toEqual([])
     expect(requests).toHaveLength(1)
-    expect(units()).toBe(100)
   })
 })
 
@@ -158,12 +144,12 @@ describe('listUploadsSince', () => {
     expect(requests).toHaveLength(2)
   })
 
-  it(`reads at most ${MAX_UPLOAD_PAGES} pages`, async () => {
+  it('reads at most 20 pages', async () => {
     const { client, requests } = setup(() => ({
       body: { items: [item('x', '2026-11-05T00:00:00Z')], nextPageToken: 'more' },
     }))
     await client.listUploadsSince('UUx', since)
-    expect(requests).toHaveLength(MAX_UPLOAD_PAGES)
+    expect(requests).toHaveLength(20)
   })
 })
 
@@ -229,8 +215,8 @@ describe('getVideos', () => {
 })
 
 describe('insertPlaylistItem', () => {
-  it('POSTs the video resource and costs 50 units', async () => {
-    const { client, requests, units } = setup(() => ({ body: { id: 'item1' } }))
+  it('POSTs the video resource', async () => {
+    const { client, requests } = setup(() => ({ body: { id: 'item1' } }))
     await client.insertPlaylistItem('PL1', 'vid1')
     expect(requests[0]?.method).toBe('POST')
     expect(requests[0]?.url.searchParams.get('part')).toBe('snippet')
@@ -238,39 +224,33 @@ describe('insertPlaylistItem', () => {
     expect(requests[0]?.body).toEqual({
       snippet: { playlistId: 'PL1', resourceId: { kind: 'youtube#video', videoId: 'vid1' } },
     })
-    expect(units()).toBe(50)
   })
 })
 
 describe('auth and errors', () => {
   it('refreshes the token once after a 401 and retries', async () => {
-    const { client, requests, getAccessToken, units } = setup((_req, i) =>
+    const { client, requests, getAccessToken } = setup((_req, i) =>
       i === 0 ? { status: 401, body: googleError(401, 'authError') } : { body: { items: [] } },
     )
     await client.listMyPlaylists()
     expect(getAccessToken).toHaveBeenLastCalledWith({ forceRefresh: true })
     expect(requests[1]?.headers['authorization']).toBe('Bearer fresh-token')
-    expect(units()).toBe(2) // both attempts are counted
   })
 
   it('reports unauthorized when the refreshed token is also rejected', async () => {
     const { client } = setup(() => ({ status: 401, body: googleError(401, 'authError') }))
-    await expect(client.listMyPlaylists()).rejects.toMatchObject({
-      kind: 'unauthorized',
-      status: 401,
-    })
+    await expect(client.listMyPlaylists()).rejects.toMatchObject({ kind: 'unauthorized' })
   })
 
-  it('passes through errors thrown by the token provider (e.g. revoked refresh token)', async () => {
-    const f = fakeFetch(() => ({ body: {} }))
+  it('passes through errors thrown by the token provider (e.g. revoked sign-in)', async () => {
+    const requests = stubFetch(() => ({ body: {} }))
     const client = createYouTubeClient({
-      fetch: f.fetch,
       getAccessToken: async () => {
         throw new YouTubeApiError('unauthorized', 'invalid_grant')
       },
     })
     await expect(client.listMyPlaylists()).rejects.toMatchObject({ kind: 'unauthorized' })
-    expect(f.requests).toHaveLength(0)
+    expect(requests).toHaveLength(0)
   })
 
   it.each([
@@ -284,35 +264,41 @@ describe('auth and errors', () => {
     const { client } = setup(() => ({ status, body: googleError(status, reason, `msg ${reason}`) }))
     const err = await client.insertPlaylistItem('PL', 'v').catch((e: unknown) => e)
     expect(err).toBeInstanceOf(YouTubeApiError)
-    expect(err).toMatchObject({ kind, status, reason, message: `msg ${reason}` })
+    expect(err).toMatchObject({ kind, message: `msg ${reason}` })
+  })
+
+  it.each([
+    [401, 'unauthorized'],
+    [403, 'forbidden'],
+    [404, 'notFound'],
+    [429, 'rateLimited'],
+    [502, 'unknown'],
+  ])('falls back to HTTP %i → %s without a body', async (status, kind) => {
+    const { client } = setup(() => ({ status }))
+    await expect(client.insertPlaylistItem('PL', 'v')).rejects.toMatchObject({ kind })
   })
 
   it('maps failed connections to kind network', async () => {
     const { client } = setup(() => new TypeError('fetch failed'))
     await expect(client.listMyPlaylists()).rejects.toMatchObject({ kind: 'network' })
   })
-
-  it('handles error responses without a JSON body', async () => {
-    const { client } = setup(() => ({ status: 404 }))
-    await expect(client.listMyPlaylists()).rejects.toMatchObject({ kind: 'notFound', status: 404 })
-  })
 })
 
 describe('isShortVideo', () => {
-  const probe = (reply: FakeReply) => fakeFetch(() => reply)
-
   it('is true when /shorts/{id} answers 200', async () => {
-    const f = probe({ status: 200 })
-    expect(await isShortVideo('abc', f.fetch)).toBe(true)
-    expect(f.requests[0]?.method).toBe('HEAD')
-    expect(f.requests[0]?.url.href).toBe('https://www.youtube.com/shorts/abc')
+    const requests = stubFetch(() => ({ status: 200 }))
+    expect(await isShortVideo('abc')).toBe(true)
+    expect(requests[0]?.method).toBe('HEAD')
+    expect(requests[0]?.url.href).toBe('https://www.youtube.com/shorts/abc')
   })
 
   it('is false when it redirects to /watch', async () => {
-    expect(await isShortVideo('abc', probe({ status: 303 }).fetch)).toBe(false)
+    stubFetch(() => ({ status: 303 }))
+    expect(await isShortVideo('abc')).toBe(false)
   })
 
   it('is false (treated as regular) on network failure', async () => {
-    expect(await isShortVideo('abc', probe(new TypeError('offline')).fetch)).toBe(false)
+    stubFetch(() => new TypeError('offline'))
+    expect(await isShortVideo('abc')).toBe(false)
   })
 })

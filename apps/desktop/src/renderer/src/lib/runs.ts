@@ -1,14 +1,15 @@
+// Short descriptions of a scan's outcome.
 import type { RunView } from '../../../shared/api'
+import { plural } from '../../../shared/format'
 
-/** One-line outcome, e.g. "Added 3 videos" or "Failed: quota used up". */
+/** E.g. "Added 3 videos", "No new videos" or "Failed: Quota used up". */
 export function runHeadline(run: RunView): string {
-  const n = run.addedCount
-  const added = `${n} ${n === 1 ? 'video' : 'videos'}`
+  const added = plural(run.addedCount, 'video')
   switch (run.status) {
     case 'running':
       return 'Scanning…'
     case 'ok':
-      return n === 0 ? 'No new videos' : `Added ${added}`
+      return run.addedCount === 0 ? 'No new videos' : `Added ${added}`
     case 'partial':
       return `Added ${added}, then stopped: ${run.error?.message ?? ''}`
     case 'error':

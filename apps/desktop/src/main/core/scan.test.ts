@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { createMemoryStorage, OVERLAP_MS, runScan, type ScanDeps } from '../src'
-import { contractChannel, contractScheduler } from '../src/testing'
-import { fakeYouTube, type FakeVideo } from './helpers/fakeYouTube'
+import { openDatabase } from '../db/database'
+import { createSqliteStorage } from '../db/sqlite-storage'
+import { fakeYouTube, type FakeVideo } from '../test/fakeYouTube'
+import { scheduler, tracked } from '../test/fixtures'
+import { runScan, type ScanDeps } from './scan'
+
+const OVERLAP_MS = 24 * 60 * 60 * 1000
+
+/** A fresh in-memory database. */
+function memoryStorage() {
+  const storage = createSqliteStorage(openDatabase(':memory:'))
+  return Object.assign(storage, {
+    track: (schedulerId: string, t: ReturnType<typeof tracked>) =>
+      storage.trackChannel(schedulerId, t.channel, t.sinceAt),
+  })
+}
 
 const SINCE = '2026-11-01T00:00:00Z'
 const PL = 'PL-s1'
@@ -9,10 +22,10 @@ const PL = 'PL-s1'
 /** Two channels (UC1 → UU1, UC2 → UU2) tracked since Nov 1 by scheduler "s1". */
 function setup(videos: FakeVideo[], opts: { playlist?: string[]; now?: string } = {}) {
   const yt = fakeYouTube(videos, { [PL]: opts.playlist ?? [] })
-  const storage = createMemoryStorage()
-  storage.putScheduler(contractScheduler('s1', { playlistId: PL }))
-  storage.trackChannel('s1', contractChannel('UC1', new Date(SINCE)))
-  storage.trackChannel('s1', contractChannel('UC2', new Date(SINCE)))
+  const storage = memoryStorage()
+  storage.insertScheduler(scheduler('s1', { playlistId: PL }))
+  storage.track('s1', tracked('UC1', new Date(SINCE)))
+  storage.track('s1', tracked('UC2', new Date(SINCE)))
   let now = new Date(opts.now ?? '2026-11-10T01:00:00Z')
   const deps: ScanDeps = { storage, client: yt.client, isShort: yt.isShort, now: () => now }
   return {
@@ -47,7 +60,7 @@ describe('runScan: first scan', () => {
     expect(t.yt.playlist(PL)).toEqual(['edge', 'a1', 'b2', 'a3'])
     expect(r.error).toBeUndefined()
     expect((await t.storage.getScheduler('s1'))?.lastSuccessAt).toEqual(r.startedAt)
-    expect(await t.storage.listAddedVideoIds('s1')).toEqual(new Set(['edge', 'a1', 'b2', 'a3']))
+    expect(await t.storage.listHandledVideoIds('s1')).toEqual(new Set(['edge', 'a1', 'b2', 'a3']))
   })
 
   it('skips Shorts, livestreams, premieres and upcoming streams, and remembers them', async () => {
@@ -102,7 +115,7 @@ describe('runScan: no duplicates', () => {
     expect(r.added.map((x) => x.id)).toEqual(['a'])
     expect(r.skipped).toEqual([{ videoId: 'b', title: 'Title b', reason: 'inPlaylist' }])
     expect(t.yt.playlist(PL)).toEqual(['b', 'a'])
-    expect(await t.storage.listAddedVideoIds('s1')).toEqual(new Set(['a', 'b']))
+    expect(await t.storage.listHandledVideoIds('s1')).toEqual(new Set(['a', 'b']))
   })
 
   it('does not re-add a video you removed from the playlist', async () => {
@@ -156,7 +169,7 @@ describe('runScan: cursor', () => {
       v('c-old', '2026-11-03T00:00:00Z', { channelUploads: 'UU3' }),
       v('c-new', '2026-11-07T00:00:00Z', { channelUploads: 'UU3' }),
     ])
-    t.storage.trackChannel('s1', contractChannel('UC3', new Date('2026-11-06T00:00:00Z')))
+    t.storage.track('s1', tracked('UC3', new Date('2026-11-06T00:00:00Z')))
     const r = await t.scan()
     expect(r.added.map((x) => x.id)).toEqual(['c-new'])
   })
@@ -195,20 +208,6 @@ describe('runScan: quota and partial scans', () => {
     t.yt.queueInsertResults('quotaExceeded')
     const r = await t.scan()
     expect(r).toMatchObject({ status: 'error', added: [], error: { kind: 'quotaExceeded' } })
-  })
-
-  it('warns when the local quota estimate is too low, but still tries', async () => {
-    const t = setup(three)
-    t.deps.quotaRemaining = () => 120 // enough for 2 inserts (50 each), not 3
-    const r = await t.scan()
-    expect(r.quotaWarning).toBe(true)
-    expect(r.added).toHaveLength(3)
-  })
-
-  it('does not warn when the estimate is enough', async () => {
-    const t = setup(three)
-    t.deps.quotaRemaining = () => 150
-    expect((await t.scan()).quotaWarning).toBe(false)
   })
 })
 
@@ -253,7 +252,7 @@ describe('runScan: errors', () => {
       t.yt.failOn.listUploadsSince = kind
       const r = await t.scan()
       expect(r).toMatchObject({ status: 'error', error: { kind }, added: [], deactivated: false })
-      expect(await t.storage.listAddedVideoIds('s1')).toEqual(new Set())
+      expect(await t.storage.listHandledVideoIds('s1')).toEqual(new Set())
       expect((await t.storage.getScheduler('s1'))?.lastSuccessAt).toBeUndefined()
     },
   )
@@ -283,7 +282,7 @@ describe('runScan: errors', () => {
     const t = setup([v('hidden', '2026-11-02T00:00:00Z', { hidden: true })])
     const r = await t.scan()
     expect(r.skipped).toEqual([{ videoId: 'hidden', reason: 'unavailable' }])
-    expect(await t.storage.listAddedVideoIds('s1')).toEqual(new Set())
+    expect(await t.storage.listHandledVideoIds('s1')).toEqual(new Set())
   })
 
   it('reports an unknown scheduler', async () => {
@@ -304,10 +303,10 @@ describe('runScan: errors', () => {
 describe('runScan: several schedulers', () => {
   it('lets the same channel feed two schedulers, each into its own playlist', async () => {
     const yt = fakeYouTube([v('a', '2026-11-02T00:00:00Z')], { 'PL-s1': [], 'PL-s2': [] })
-    const storage = createMemoryStorage()
+    const storage = memoryStorage()
     for (const id of ['s1', 's2']) {
-      storage.putScheduler(contractScheduler(id, { playlistId: `PL-${id}` }))
-      storage.trackChannel(id, contractChannel('UC1', new Date(SINCE)))
+      storage.insertScheduler(scheduler(id, { playlistId: `PL-${id}` }))
+      storage.track(id, tracked('UC1', new Date(SINCE)))
     }
     const deps: ScanDeps = {
       storage,
@@ -320,7 +319,7 @@ describe('runScan: several schedulers', () => {
     expect(yt.playlist('PL-s1')).toEqual(['a'])
     expect(yt.playlist('PL-s2')).toEqual(['a'])
     // Each scheduler keeps its own history.
-    expect(await storage.listAddedVideoIds('s1')).toEqual(new Set(['a']))
-    expect(await storage.listAddedVideoIds('s2')).toEqual(new Set(['a']))
+    expect(await storage.listHandledVideoIds('s1')).toEqual(new Set(['a']))
+    expect(await storage.listHandledVideoIds('s2')).toEqual(new Set(['a']))
   })
 })

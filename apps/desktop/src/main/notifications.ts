@@ -1,39 +1,28 @@
+// Wording of the Windows notifications shown after a scan.
 import type { RunView } from '../shared/api'
+import { plural } from '../shared/format'
 
 export interface NotificationText {
   title: string
   body: string
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-
-/** Up to three titles, then "and N more". */
-function titles(run: RunView): string {
-  const added = run.details?.added ?? []
-  const shown = added.slice(0, 3).map((v) => `• ${v.title}`)
-  if (added.length > 3) shown.push(`…and ${added.length - 3} more`)
-  return shown.join('\n')
-}
-
-/**
- * What to tell the user after a scan, or null when there's nothing worth a
- * notification (a successful scan with no new videos).
- */
+/** What to tell the user after a scan, or null for a successful scan with nothing new. */
 export function notificationFor(run: RunView, playlistTitle: string): NotificationText | null {
   const name = run.schedulerName
+  const added = run.details?.added ?? []
   const unavailable = run.details?.unavailableChannels ?? []
-  const channelNote =
-    unavailable.length > 0
-      ? `\n${plural(unavailable.length, 'channel')} couldn't be read (deleted?): ${unavailable
-          .map((c) => c.title)
-          .join(', ')}`
-      : ''
+  const channelNote = unavailable.length
+    ? `\n${plural(unavailable.length, 'channel')} couldn't be read (deleted?): ${unavailable.map((c) => c.title).join(', ')}`
+    : ''
 
   if (run.status === 'ok') {
     if (run.addedCount === 0) return channelNote ? { title: name, body: channelNote.trim() } : null
+    const titles = added.slice(0, 3).map((v) => `• ${v.title}`)
+    if (added.length > 3) titles.push(`…and ${added.length - 3} more`)
     return {
       title: `Added ${plural(run.addedCount, 'video')} to ${playlistTitle}`,
-      body: titles(run) + channelNote,
+      body: titles.join('\n') + channelNote,
     }
   }
 

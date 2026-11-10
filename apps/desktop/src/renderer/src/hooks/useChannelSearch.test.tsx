@@ -45,7 +45,7 @@ describe('useChannelSearch', () => {
     expect(t.search).toHaveBeenCalledExactlyOnceWith('linus')
     expect(t.result.current).toEqual({
       status: 'done',
-      result: { source: 'search', channels: [channel(1), channel(2)] },
+      channels: [channel(1), channel(2)],
     })
   })
 
@@ -67,10 +67,10 @@ describe('useChannelSearch', () => {
     await t.wait(SEARCH_DEBOUNCE_MS) // first search in flight
     t.type('second')
     await t.wait(SEARCH_DEBOUNCE_MS) // second search answered
-    await act(async () => resolveOld({ source: 'search', channels: [channel(9)] }))
+    await act(async () => resolveOld([channel(9)]))
     expect(t.result.current).toEqual({
       status: 'done',
-      result: { source: 'search', channels: [channel(1), channel(2)] },
+      channels: [channel(1), channel(2)],
     })
   })
 

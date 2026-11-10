@@ -1,16 +1,14 @@
+// A controllable fake of `window.api` for renderer tests.
 import { vi } from 'vitest'
 import type {
   Api,
   AuthStatus,
   Channel,
-  ChannelSearchResult,
   Playlist,
-  QuotaStatus,
   RunView,
   SchedulerInput,
   SchedulerView,
 } from '../../../shared/api'
-import { ApiError } from '../lib/api'
 
 export const signedOut: AuthStatus = { configured: true, signedIn: false, signingIn: false }
 export const signedIn: AuthStatus = {
@@ -51,13 +49,11 @@ export const run = (over: Partial<RunView> = {}): RunView => ({
     ],
     skipped: [{ videoId: 'v3', title: 'A short', reason: 'short' }],
     unavailableChannels: [],
-    quotaWarning: false,
     deactivated: false,
   },
   ...over,
 })
 
-/** A channel as search returns it. */
 export const channel = (n: number, over: Partial<Channel> = {}): Channel => ({
   id: `UC${String(n).padStart(22, '0')}`,
   title: `Channel ${n}`,
@@ -68,129 +64,100 @@ export const channel = (n: number, over: Partial<Channel> = {}): Channel => ({
 })
 
 /**
- * A controllable fake of the renderer `Api`. Schedulers live in memory and
- * enforce one-playlist-per-scheduler like main does. `emit`/`emitQuota`
- * simulate pushes from main.
+ * Schedulers live in memory and one playlist per scheduler is enforced like
+ * main does. `emit*` simulate pushes from main.
  */
 export function fakeApi(
   initial: AuthStatus,
   opts: {
     playlists?: Playlist[]
     schedulers?: SchedulerView[]
-    search?: (query: string) => ChannelSearchResult
-    quota?: QuotaStatus
+    search?: (query: string) => Channel[]
     runs?: RunView[]
-    /** What "Run now" resolves with (default: a successful run adding 2 videos). */
-    runResult?: (schedulerId: string) => RunView
     paused?: boolean
   } = {},
 ) {
-  const listeners = new Set<(s: AuthStatus) => void>()
+  const authListeners = new Set<(s: AuthStatus) => void>()
   const runListeners = new Set<() => void>()
-  const stateListeners = new Set<(s: { paused: boolean }) => void>()
-  let paused = opts.paused ?? false
-  let runs = [...(opts.runs ?? [])]
-  const quotaListeners = new Set<(s: QuotaStatus) => void>()
+  const pausedListeners = new Set<(p: boolean) => void>()
   let schedulers = [...(opts.schedulers ?? [])]
+  let runs = [...(opts.runs ?? [])]
+  let paused = opts.paused ?? false
   let nextId = 100
 
-  const assertFree = (input: SchedulerInput, exceptId?: string) => {
+  const check = (input: SchedulerInput, exceptId?: string) => {
     const owner = schedulers.find((s) => s.playlistId === input.playlistId && s.id !== exceptId)
-    if (owner) throw new ApiError('validation', `That playlist is already used by "${owner.name}".`)
-    if (!input.name.trim()) throw new ApiError('validation', 'Give the scheduler a name.')
+    if (owner) throw new Error(`That playlist is already used by "${owner.name}".`)
+    if (!input.name.trim()) throw new Error('Give the scheduler a name.')
+  }
+  const update = (id: string, change: Partial<SchedulerView>) => {
+    const s = { ...schedulers.find((x) => x.id === id)!, ...change }
+    schedulers = schedulers.map((x) => (x.id === id ? s : x))
+    return s
   }
 
   const api = {
-    versions: { electron: '45', chrome: '156', node: '24' },
     auth: {
       getStatus: vi.fn(async () => initial),
       signIn: vi.fn(async () => signedIn),
       cancelSignIn: vi.fn(async () => undefined),
       signOut: vi.fn(async () => signedOut),
       onStatusChange: vi.fn((l: (s: AuthStatus) => void) => {
-        listeners.add(l)
-        return () => listeners.delete(l)
+        authListeners.add(l)
+        return () => authListeners.delete(l)
       }),
     },
     youtube: {
       listMyPlaylists: vi.fn(async () => opts.playlists ?? []),
     },
     channels: {
-      search: vi.fn(
-        async (query: string): Promise<ChannelSearchResult> =>
-          opts.search?.(query) ?? { source: 'search', channels: [channel(1), channel(2)] },
-      ),
-    },
-    quota: {
-      get: vi.fn(
-        async (): Promise<QuotaStatus> =>
-          opts.quota ?? { used: 0, limit: 10_000, resetsAt: '2026-11-11T08:00:00.000Z' },
-      ),
-      onChange: vi.fn((l: (s: QuotaStatus) => void) => {
-        quotaListeners.add(l)
-        return () => quotaListeners.delete(l)
-      }),
+      search: vi.fn(async (q: string) => opts.search?.(q) ?? [channel(1), channel(2)]),
     },
     schedulers: {
       list: vi.fn(async () => schedulers),
       create: vi.fn(async (input: SchedulerInput) => {
-        assertFree(input)
+        check(input)
         const s = view({ ...input, id: `s${nextId++}`, name: input.name.trim() })
         schedulers = [...schedulers, s]
         return s
       }),
       update: vi.fn(async (id: string, input: SchedulerInput) => {
-        assertFree(input, id)
-        const s = { ...schedulers.find((x) => x.id === id)!, ...input }
-        schedulers = schedulers.map((x) => (x.id === id ? s : x))
-        return s
+        check(input, id)
+        return update(id, input)
       }),
-      setActive: vi.fn(async (id: string, active: boolean) => {
-        const s = { ...schedulers.find((x) => x.id === id)!, active }
-        schedulers = schedulers.map((x) => (x.id === id ? s : x))
-        return s
-      }),
+      setActive: vi.fn(async (id: string, active: boolean) => update(id, { active })),
       remove: vi.fn(async (id: string) => {
         schedulers = schedulers.filter((x) => x.id !== id)
       }),
       runNow: vi.fn(async (id: string) => {
         const name = schedulers.find((x) => x.id === id)?.name ?? '?'
-        const r =
-          opts.runResult?.(id) ?? run({ id: `r${nextId++}`, schedulerId: id, schedulerName: name })
+        const r = run({ id: `r${nextId++}`, schedulerId: id, schedulerName: name })
         runs = [r, ...runs]
-        schedulers = schedulers.map((x) => (x.id === id ? { ...x, lastRun: r } : x))
+        update(id, { lastRun: r })
         return r
       }),
     },
     runs: {
-      list: vi.fn(async (o?: { schedulerId?: string }) =>
-        runs.filter((r) => !o?.schedulerId || r.schedulerId === o.schedulerId),
-      ),
+      list: vi.fn(async () => runs),
       onChange: vi.fn((l: () => void) => {
         runListeners.add(l)
         return () => runListeners.delete(l)
       }),
     },
-    debug: {
-      lookback: vi.fn(async () => undefined),
-    },
-    app: {
-      getState: vi.fn(async () => ({ paused })),
-      setPaused: vi.fn(async (p: boolean) => {
-        paused = p
-        return { paused }
-      }),
-      onStateChange: vi.fn((l: (s: { paused: boolean }) => void) => {
-        stateListeners.add(l)
-        return () => stateListeners.delete(l)
+    scans: {
+      isPaused: vi.fn(async () => paused),
+      setPaused: vi.fn(async (p: boolean) => (paused = p)),
+      onPausedChange: vi.fn((l: (p: boolean) => void) => {
+        pausedListeners.add(l)
+        return () => pausedListeners.delete(l)
       }),
     },
   } satisfies Api
+
   return {
     api,
-    emit: (s: AuthStatus) => listeners.forEach((l) => l(s)),
-    emitQuota: (q: QuotaStatus) => quotaListeners.forEach((l) => l(q)),
+    emit: (s: AuthStatus) => authListeners.forEach((l) => l(s)),
     emitRuns: () => runListeners.forEach((l) => l()),
-    emitState: (s: { paused: boolean }) => stateListeners.forEach((l) => l(s)),
+    emitPaused: (p: boolean) => pausedListeners.forEach((l) => l(p)),
   }
 }

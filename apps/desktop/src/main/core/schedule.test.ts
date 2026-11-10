@@ -1,6 +1,13 @@
 import { DateTime } from 'luxon'
 import { describe, expect, it } from 'vitest'
-import { checkDue, firstRunAt, nextSlotAfter, validateSchedule, type ScheduleSpec } from '../src'
+import {
+  firstRunAt,
+  isValidTimeZone,
+  nextRunIfDue,
+  nextSlotAfter,
+  validateSchedule,
+  type ScheduleSpec,
+} from './schedule'
 
 const KL = 'Asia/Kuala_Lumpur'
 const DENVER = 'America/Denver'
@@ -36,10 +43,14 @@ describe('validateSchedule', () => {
     expect(validateSchedule(spec({ timezone: 'Mars/Base' }))).toHaveLength(1)
     expect(validateSchedule({ intervalDays: 0, timeOfDay: 'x', timezone: 'nope' })).toHaveLength(3)
   })
+})
 
-  it('makes the scheduling functions throw on invalid specs', () => {
-    expect(() => firstRunAt(spec({ intervalDays: 0 }), new Date())).toThrow(RangeError)
-    expect(() => checkDue(spec({ timeOfDay: 'x' }), new Date(0), new Date())).toThrow(RangeError)
+describe('isValidTimeZone', () => {
+  it('accepts IANA zones and rejects unknown or empty ones', () => {
+    expect(isValidTimeZone('Asia/Kuala_Lumpur')).toBe(true)
+    expect(isValidTimeZone('UTC')).toBe(true)
+    expect(isValidTimeZone('Mars/Olympus_Mons')).toBe(false)
+    expect(isValidTimeZone('  ')).toBe(false)
   })
 })
 
@@ -138,37 +149,28 @@ describe('daylight saving (America/Denver)', () => {
   })
 })
 
-describe('checkDue (catch-up)', () => {
+describe('nextRunIfDue (catch-up)', () => {
   const nextRunAt = at('2026-11-10T09:00')
 
-  it('is not due before the slot', () => {
-    expect(checkDue(spec(), nextRunAt, at('2026-11-10T08:59'))).toEqual({
-      due: false,
-      missedSlots: 0,
-      nextRunAt,
-    })
+  it('is null before the slot', () => {
+    expect(nextRunIfDue(spec(), nextRunAt, at('2026-11-10T08:59'))).toBeNull()
   })
 
-  it('is due exactly at the slot, and schedules the next one', () => {
-    const r = checkDue(spec({ intervalDays: 2 }), nextRunAt, at('2026-11-10T09:00'))
-    expect(r.due).toBe(true)
-    expect(r.missedSlots).toBe(1)
-    expect(wall(r.nextRunAt)).toBe('2026-11-12 09:00')
+  it('is due exactly at the slot, and returns the following one', () => {
+    expect(wall(nextRunIfDue(spec({ intervalDays: 2 }), nextRunAt, at('2026-11-10T09:00'))!)).toBe(
+      '2026-11-12 09:00',
+    )
   })
 
   it('runs many missed slots only once and stays on the original cadence', () => {
     // Every 3 days from Nov 10: Nov 10, 13, 16, 19 all passed by Nov 20 noon.
-    const r = checkDue(spec({ intervalDays: 3 }), nextRunAt, at('2026-11-20T12:00'))
-    expect(r.due).toBe(true)
-    expect(r.missedSlots).toBe(4)
-    expect(wall(r.nextRunAt)).toBe('2026-11-22 09:00')
+    const next = nextRunIfDue(spec({ intervalDays: 3 }), nextRunAt, at('2026-11-20T12:00'))
+    expect(wall(next!)).toBe('2026-11-22 09:00')
   })
 
-  it('counts a slot later the same day correctly after a long gap', () => {
-    // PC off from Nov 10 until Nov 15 08:00; daily slot at 09:00 today hasn't passed.
-    const r = checkDue(spec(), nextRunAt, at('2026-11-15T08:00'))
-    expect(r.missedSlots).toBe(5) // Nov 10–14
-    expect(wall(r.nextRunAt)).toBe('2026-11-15 09:00')
+  it('picks a slot later the same day after a long gap', () => {
+    // PC off from Nov 10 until Nov 15 08:00; today's 09:00 hasn't passed yet.
+    expect(wall(nextRunIfDue(spec(), nextRunAt, at('2026-11-15T08:00'))!)).toBe('2026-11-15 09:00')
   })
 })
 

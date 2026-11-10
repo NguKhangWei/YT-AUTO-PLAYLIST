@@ -1,30 +1,15 @@
-import { useEffect, useState } from 'react'
-import type { RunView } from '../../../shared/api'
+// History tab: recent scans of all schedulers, newest first.
+import type { Api } from '../../../shared/api'
 import { RunDetailsList, StatusBadge } from '@/components/RunSummary'
-import { useApi } from '@/lib/api'
+import { useLive } from '@/hooks/useLive'
 import { formatLocal } from '@/lib/format'
 import { runHeadline } from '@/lib/runs'
 
-/** Recent scans of all schedulers, newest first; refreshes when a scan starts or ends. */
-export function RunHistory() {
-  const api = useApi()
-  const [runs, setRuns] = useState<RunView[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+const loadRuns = (api: Api) => api.runs.list()
+const watchRuns = (api: Api, reload: () => void) => api.runs.onChange(() => reload())
 
-  useEffect(() => {
-    let alive = true
-    const load = () =>
-      api.runs.list({ limit: 100 }).then(
-        (r) => alive && setRuns(r),
-        (e: Error) => alive && setError(e.message),
-      )
-    void load()
-    const off = api.runs.onChange(() => void load())
-    return () => {
-      alive = false
-      off()
-    }
-  }, [api])
+export function RunHistory() {
+  const { value: runs, error } = useLive(loadRuns, watchRuns)
 
   if (error) {
     return (

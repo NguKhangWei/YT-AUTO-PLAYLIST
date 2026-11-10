@@ -29,23 +29,6 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
-    // Core must stay runtime-agnostic (Cloudflare Worker-ready): no Node or Electron imports.
-    files: ['packages/core/**'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['node:*', 'electron', 'fs', 'path', 'os', 'crypto'],
-              message: 'core must not depend on Node/Electron APIs.',
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
     files: ['apps/desktop/src/renderer/**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },
     plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },

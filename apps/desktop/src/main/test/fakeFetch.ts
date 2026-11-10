@@ -1,3 +1,6 @@
+// Replaces global fetch for a test and records every request (restored after each test).
+import { vi } from 'vitest'
+
 export interface RecordedRequest {
   method: string
   url: URL
@@ -5,16 +8,12 @@ export interface RecordedRequest {
   body: unknown
 }
 
-export type FakeReply = { status?: number; body?: unknown } | Error
+export type FakeReply = { status?: number; body?: unknown } | Error // an Error simulates a network failure
 
-/**
- * A `fetch` stand-in. Each request is passed to `handler`, which returns the
- * status/JSON to answer with (or an Error to simulate a network failure).
- * All requests are recorded in `requests`.
- */
-export function fakeFetch(handler: (req: RecordedRequest, index: number) => FakeReply) {
+/** Answers each request with `handler`'s reply; returns the list of recorded requests. */
+export function stubFetch(handler: (req: RecordedRequest, index: number) => FakeReply) {
   const requests: RecordedRequest[] = []
-  const fn = (async (input: string | URL | Request, init: RequestInit = {}) => {
+  vi.stubGlobal('fetch', async (input: string | URL | Request, init: RequestInit = {}) => {
     const req: RecordedRequest = {
       method: init.method ?? 'GET',
       url: new URL(String(input)),
@@ -28,11 +27,10 @@ export function fakeFetch(handler: (req: RecordedRequest, index: number) => Fake
       status: reply.status ?? 200,
       headers: { 'Content-Type': 'application/json' },
     })
-  }) as typeof fetch
-  return { fetch: fn, requests }
+  })
+  return requests
 }
 
-/** Google API error body, as YouTube returns it. */
 export const googleError = (code: number, reason: string, message = reason) => ({
   error: { code, message, errors: [{ reason, domain: 'youtube' }] },
 })

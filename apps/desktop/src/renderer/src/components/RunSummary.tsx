@@ -1,9 +1,10 @@
-import type { RunSkipReason, RunView } from '../../../shared/api'
+// Pieces that describe a scan: status badge, details list and the card's "last scan" line.
+import type { RunView, SkipReason } from '../../../shared/api'
 import { formatRelative } from '@/lib/format'
 import { runHeadline } from '@/lib/runs'
 import { cn } from '@/lib/utils'
 
-const SKIP_LABELS: Record<RunSkipReason, string> = {
+const SKIP_LABELS: Record<SkipReason, string> = {
   short: 'Shorts',
   livestream: 'livestreams/premieres',
   live: 'live now',
@@ -29,11 +30,11 @@ export function StatusBadge({ status }: { status: RunView['status'] }) {
   )
 }
 
-/** Added videos (linked), skipped counts by reason and unreadable channels. */
+/** Added videos (linked), skipped counts and unreadable channels. */
 export function RunDetailsList({ run }: { run: RunView }) {
   const d = run.details
   if (!d) return null
-  const skippedByReason = new Map<RunSkipReason, number>()
+  const skippedByReason = new Map<SkipReason, number>()
   for (const s of d.skipped) skippedByReason.set(s.reason, (skippedByReason.get(s.reason) ?? 0) + 1)
 
   return (
@@ -64,11 +65,6 @@ export function RunDetailsList({ run }: { run: RunView }) {
         <p className="text-amber-700 dark:text-amber-400">
           Couldn&apos;t read: {d.unavailableChannels.map((c) => c.title).join(', ')} (deleted
           channel?)
-        </p>
-      )}
-      {d.quotaWarning && (
-        <p className="text-amber-700 dark:text-amber-400">
-          The app&apos;s quota estimate was low before adding videos.
         </p>
       )}
       {d.deactivated && (

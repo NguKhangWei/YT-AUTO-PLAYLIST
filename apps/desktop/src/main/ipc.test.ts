@@ -1,6 +1,6 @@
-import { YouTubeApiError } from '@auto-yt/core'
 import { describe, expect, it } from 'vitest'
-import { listMyPlaylists, toErrorInfo, wrap } from './ipc'
+import { YouTubeApiError } from './core/youtube/errors'
+import { listMyPlaylists, wrap } from './ipc'
 
 describe('wrap', () => {
   it('returns data in an ok envelope', async () => {
@@ -8,21 +8,12 @@ describe('wrap', () => {
     expect(await handler({}, 2, 3)).toEqual({ ok: true, data: 5 })
   })
 
-  it('turns thrown errors into an error envelope that keeps the kind', async () => {
+  it('returns the error message unchanged', async () => {
     const handler = wrap(async () => {
       throw new YouTubeApiError('quotaExceeded', 'Quota used up')
     })
-    expect(await handler({})).toEqual({
-      ok: false,
-      error: { kind: 'quotaExceeded', message: 'Quota used up' },
-    })
-  })
-})
-
-describe('toErrorInfo', () => {
-  it('handles plain errors and non-errors', () => {
-    expect(toErrorInfo(new Error('x'))).toEqual({ kind: 'error', message: 'x' })
-    expect(toErrorInfo('weird')).toEqual({ kind: 'error', message: 'weird' })
+    expect(await handler({})).toEqual({ ok: false, error: 'Quota used up' })
+    expect(await wrap(() => Promise.reject('weird'))({})).toEqual({ ok: false, error: 'weird' })
   })
 })
 
@@ -30,13 +21,10 @@ describe('listMyPlaylists', () => {
   it('explains an account without a YouTube channel', async () => {
     const youtube = {
       listMyPlaylists: async () => {
-        throw new YouTubeApiError('notFound', 'Channel not found.', 404, 'channelNotFound')
+        throw new YouTubeApiError('notFound', 'Channel not found.')
       },
     }
-    await expect(listMyPlaylists(youtube)).rejects.toMatchObject({
-      kind: 'noChannel',
-      message: expect.stringContaining('has no YouTube channel'),
-    })
+    await expect(listMyPlaylists(youtube)).rejects.toThrow('has no YouTube channel')
   })
 
   it('passes other results and errors through', async () => {

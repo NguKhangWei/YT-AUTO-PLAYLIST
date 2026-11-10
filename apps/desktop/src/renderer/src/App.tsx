@@ -1,11 +1,16 @@
-import { useAuthStatus } from '@/hooks/useAuthStatus'
+// Shows setup, sign-in or the main screen depending on the sign-in state.
+import type { Api, AuthStatus } from '../../shared/api'
+import { useLive } from '@/hooks/useLive'
 import { HomeScreen } from '@/screens/HomeScreen'
 import { SetupScreen } from '@/screens/SetupScreen'
 import { SignInScreen } from '@/screens/SignInScreen'
 
-/** Routes between setup, sign-in and the main screen based on auth status. */
+const loadStatus = (api: Api) => api.auth.getStatus()
+const watchStatus = (api: Api, onChange: (s?: AuthStatus) => void) =>
+  api.auth.onStatusChange(onChange)
+
 export function App() {
-  const { status, error, update } = useAuthStatus()
+  const { value: status, setValue, error } = useLive(loadStatus, watchStatus)
 
   if (error) {
     return (
@@ -16,6 +21,6 @@ export function App() {
   }
   if (!status) return null
   if (!status.configured) return <SetupScreen />
-  if (!status.signedIn) return <SignInScreen status={status} onSignedIn={update} />
-  return <HomeScreen status={status} onStatus={update} />
+  if (!status.signedIn) return <SignInScreen status={status} onSignedIn={setValue} />
+  return <HomeScreen status={status} onStatus={setValue} />
 }

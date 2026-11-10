@@ -1,8 +1,8 @@
-import { contractScheduler } from '@auto-yt/core/testing'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDatabase } from './db/database'
 import { createSqliteStorage } from './db/sqlite-storage'
 import { createSchedulerLoop, TICK_MS } from './scheduler-loop'
+import { scheduler } from './test/fixtures'
 
 // 2026-11-10T00:00Z is 08:00 in Malaysia Time.
 const START = new Date('2026-11-10T00:00:00Z')
@@ -30,7 +30,7 @@ function setup(opts: { signedIn?: boolean } = {}) {
   })
   const add = (id: string, nextRunAt: string, over = {}) =>
     storage.insertScheduler(
-      contractScheduler(id, { playlistId: `PL-${id}`, nextRunAt: at(nextRunAt), ...over }),
+      scheduler(id, { playlistId: `PL-${id}`, nextRunAt: at(nextRunAt), ...over }),
     )
   const nextRun = async (id: string) => (await storage.getScheduler(id))?.nextRunAt.toISOString()
   return {

@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    // Only web-standard globals (fetch, Intl, URL): keeps core Worker-compatible.
-    "lib": ["ES2023", "DOM"],
-    "types": []
-  },
-  "include": ["src", "test"]
-}

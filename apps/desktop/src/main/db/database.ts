@@ -1,10 +1,7 @@
+// Opens the SQLite database and applies schema migrations (times are epoch ms).
 import { DatabaseSync } from 'node:sqlite'
 
-/**
- * Schema migrations, applied in order. `PRAGMA user_version` records how many
- * have run. Never edit a shipped migration; append a new one.
- * Times are stored as epoch milliseconds (INTEGER).
- */
+// Applied in order; PRAGMA user_version counts how many have run. Append, never edit.
 export const MIGRATIONS: string[] = [
   // 1: schedulers, tracked channels, handled videos
   `
@@ -86,9 +83,14 @@ export const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   ) STRICT;
   `,
+  // 5: search cache moved to memory, quota tracking removed
+  `
+  DROP TABLE search_cache;
+  DROP TABLE quota_usage;
+  `,
 ]
 
-/** Run pending migrations, each in its own transaction. */
+/** Applies pending migrations, each in its own transaction. */
 export function migrate(db: DatabaseSync): void {
   const { user_version: current } = db.prepare('PRAGMA user_version').get() as {
     user_version: number
@@ -111,7 +113,7 @@ export function migrate(db: DatabaseSync): void {
   }
 }
 
-/** Open (or create) the app database and bring its schema up to date. Use ':memory:' in tests. */
+/** Opens (or creates) the database at `path` and migrates it; ':memory:' in tests. */
 export function openDatabase(path: string): DatabaseSync {
   const db = new DatabaseSync(path)
   db.exec('PRAGMA foreign_keys = ON')

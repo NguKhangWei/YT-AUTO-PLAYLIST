@@ -1,11 +1,10 @@
+// Modal dialog (trimmed shadcn/ui).
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { XIcon } from 'lucide-react'
 import type { ComponentProps } from 'react'
 import { cn } from '@/lib/utils'
 
-// shadcn/ui Dialog (trimmed)
 export const Dialog = DialogPrimitive.Root
-export const DialogClose = DialogPrimitive.Close
 
 export function DialogContent({
   className,

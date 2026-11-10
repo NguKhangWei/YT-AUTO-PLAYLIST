@@ -1,3 +1,4 @@
+// Sign-in screen: opens Google sign-in in the browser.
 import { useState } from 'react'
 import type { AuthStatus } from '../../../shared/api'
 import { Button } from '@/components/ui/button'

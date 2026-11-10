@@ -210,7 +210,7 @@ describe('getAccessToken', () => {
     await expect(auth.getAccessToken()).rejects.toMatchObject({
       name: 'YouTubeApiError',
       kind: 'unauthorized',
-      reason: 'invalid_grant',
+      message: expect.stringContaining('sign in again'),
     })
     expect(store.value).toBeNull()
     expect(seen.at(-1)?.signedIn).toBe(false)

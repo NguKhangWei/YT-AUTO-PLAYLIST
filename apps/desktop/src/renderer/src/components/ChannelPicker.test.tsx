@@ -63,22 +63,14 @@ describe('ChannelPicker', () => {
   })
 
   it('shows hidden subscriber counts as just the handle', async () => {
-    setup(
-      [],
-      fakeApi(signedIn, {
-        search: () => ({
-          source: 'search',
-          channels: [channel(3, { subscriberCount: undefined })],
-        }),
-      }),
-    )
+    setup([], fakeApi(signedIn, { search: () => [channel(3, { subscriberCount: undefined })] }))
     fireEvent.change(screen.getByLabelText('Channels to track'), { target: { value: 'abc' } })
     await act(() => vi.advanceTimersByTimeAsync(600))
     expect(screen.getByText('@channel3')).toBeTruthy()
   })
 
   it('explains short input, empty results and errors', async () => {
-    const fake = fakeApi(signedIn, { search: () => ({ source: 'search', channels: [] }) })
+    const fake = fakeApi(signedIn, { search: () => [] })
     const t = setup([], fake)
     await t.type('ab')
     expect(screen.getByText('Type at least 3 characters.')).toBeTruthy()

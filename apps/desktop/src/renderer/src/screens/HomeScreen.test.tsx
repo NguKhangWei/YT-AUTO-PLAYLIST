@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiContext, ApiError } from '@/lib/api'
+import { ApiContext } from '@/lib/api'
 import { channel, fakeApi, run, signedIn, view } from '@/test/fakeApi'
 import type { Playlist, RunView, SchedulerView } from '../../../shared/api'
 import { HomeScreen } from './HomeScreen'
@@ -78,7 +78,7 @@ describe('scheduler list', () => {
 
   it('shows errors from actions', async () => {
     const { api } = renderHome({ schedulers: [view()] })
-    api.schedulers.setActive.mockRejectedValueOnce(new ApiError('error', 'Database is locked'))
+    api.schedulers.setActive.mockRejectedValueOnce(new Error('Database is locked'))
     fireEvent.click(await screen.findByRole('switch', { name: 'Gaming active' }))
     expect((await screen.findByRole('alert')).textContent).toBe('Database is locked')
   })
@@ -171,15 +171,6 @@ describe('scheduler editor', () => {
     )
   })
 
-  it('rejects an unknown time zone before saving', async () => {
-    const { api } = renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'New scheduler' }))
-    change('Time zone', 'Mars/Base')
-    fireEvent.click(within(dialog()).getByRole('button', { name: 'Create' }))
-    expect((await within(dialog()).findByRole('alert')).textContent).toContain('Unknown time zone')
-    expect(api.schedulers.create).not.toHaveBeenCalled()
-  })
-
   it('explains an account without playlists', async () => {
     renderHome({ playlists: [] })
     fireEvent.click(await screen.findByRole('button', { name: 'New scheduler' }))
@@ -188,10 +179,7 @@ describe('scheduler editor', () => {
 
   it('shows playlist load errors in the editor', async () => {
     renderHome({
-      tweak: (api) =>
-        api.youtube.listMyPlaylists.mockRejectedValue(
-          new ApiError('quotaExceeded', 'Quota used up'),
-        ),
+      tweak: (api) => api.youtube.listMyPlaylists.mockRejectedValue(new Error('Quota used up')),
     })
     fireEvent.click(await screen.findByRole('button', { name: 'New scheduler' }))
     expect(await within(dialog()).findByText(/Couldn.t load playlists: Quota used up/)).toBeTruthy()
@@ -293,13 +281,6 @@ describe('running scans', () => {
     act(() => fake.emitRuns())
     expect(await screen.findByText('Off')).toBeTruthy()
   })
-
-  it('offers the development-only lookback', async () => {
-    const { api } = renderHome({ schedulers: [view({ channels: [channel(1)] })] })
-    fireEvent.click(await screen.findByRole('button', { name: 'Debug: look back 7 days' }))
-    await waitFor(() => expect(api.debug.lookback).toHaveBeenCalledWith('s1', 7))
-    expect((await screen.findByRole('status')).textContent).toMatch(/last 7 days as new/)
-  })
 })
 
 describe('history tab', () => {
@@ -342,21 +323,15 @@ describe('playlist deleted on YouTube', () => {
   const recreated: Playlist[] = [{ id: 'PL-new', title: 'INFORMATIVE', itemCount: 0 }]
   const scheduler = view({ playlistId: 'PL-old', playlistTitle: 'INFORMATIVE' })
 
-  it('warns on the card', async () => {
-    renderHome({ schedulers: [scheduler], playlists: recreated })
-    expect((await screen.findByRole('alert')).textContent).toMatch(/no longer exists on YouTube/)
-  })
-
-  it('offers only existing playlists, warns, and requires a new choice before saving', async () => {
+  it('offers only existing playlists and requires a new choice before saving', async () => {
     const { api } = renderHome({ schedulers: [scheduler], playlists: recreated })
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     await within(dialog()).findByRole('option', { name: 'INFORMATIVE' })
     expect(within(dialog()).getAllByRole('option', { name: 'INFORMATIVE' })).toHaveLength(1)
     expect((field('Playlist') as HTMLSelectElement).value).toBe('')
-    expect(within(dialog()).getByText(/"INFORMATIVE" no longer exists on YouTube/)).toBeTruthy()
 
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Save' }))
-    expect((await within(dialog()).findByRole('alert')).textContent).toMatch(/no longer exists/)
+    expect((await within(dialog()).findByRole('alert')).textContent).toBe('Choose a playlist.')
     expect(api.schedulers.update).not.toHaveBeenCalled()
 
     change('Playlist', 'PL-new')
@@ -372,13 +347,12 @@ describe('playlist deleted on YouTube', () => {
   it('keeps the current playlist when the list could not be loaded', async () => {
     renderHome({
       schedulers: [scheduler],
-      tweak: (api) =>
-        api.youtube.listMyPlaylists.mockRejectedValue(new ApiError('network', 'Offline')),
+      tweak: (api) => api.youtube.listMyPlaylists.mockRejectedValue(new Error('Offline')),
     })
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     await within(dialog()).findByText(/Couldn.t load playlists/)
     expect((field('Playlist') as HTMLSelectElement).value).toBe('PL-old')
-    expect(screen.queryByText(/no longer exists/)).toBeNull()
+    expect(within(dialog()).queryByRole('alert')).toBeNull()
   })
 })
 
@@ -387,11 +361,11 @@ describe('pausing scheduled scans', () => {
     const { api } = renderHome({ schedulers: [view()] })
     fireEvent.click(await screen.findByRole('button', { name: 'Pause scans' }))
     expect(await screen.findByText(/Scheduled scans are paused/)).toBeTruthy()
-    expect(api.app.setPaused).toHaveBeenCalledWith(true)
+    expect(api.scans.setPaused).toHaveBeenCalledWith(true)
 
     fireEvent.click(screen.getByRole('button', { name: 'Resume scans' }))
     await waitFor(() => expect(screen.queryByText(/Scheduled scans are paused/)).toBeNull())
-    expect(api.app.setPaused).toHaveBeenLastCalledWith(false)
+    expect(api.scans.setPaused).toHaveBeenLastCalledWith(false)
   })
 
   it('follows a pause made from the tray', async () => {
@@ -402,7 +376,7 @@ describe('pausing scheduled scans', () => {
       </ApiContext.Provider>,
     )
     await screen.findByRole('button', { name: 'Pause scans' })
-    act(() => fake.emitState({ paused: true }))
+    act(() => fake.emitPaused(true))
     expect(await screen.findByText(/Scheduled scans are paused/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Resume scans' })).toBeTruthy()
   })

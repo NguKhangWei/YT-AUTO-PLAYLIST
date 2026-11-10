@@ -1,73 +1,51 @@
+// Exposes the main-process API to the window as `window.api`.
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppState, AuthStatus, Bridge, QuotaStatus } from '../shared/api'
+import type { Api, IpcResult } from '../shared/api'
 import { IPC } from '../shared/ipc'
 
-// Results pass through as `IpcResult` envelopes; the renderer unwraps them
-// (errors thrown here would lose their `kind` crossing the contextBridge).
-const invoke =
-  (channel: string) =>
-  (...args: unknown[]) =>
-    ipcRenderer.invoke(channel, ...args)
+/** A function that invokes `channel` and throws main's error message on failure. */
+function call(channel: string) {
+  return async (...args: unknown[]) => {
+    const result = (await ipcRenderer.invoke(channel, ...args)) as IpcResult<never>
+    if (!result.ok) throw new Error(result.error)
+    return result.data
+  }
+}
 
-const bridge: Bridge = {
-  versions: {
-    electron: process.versions.electron,
-    chrome: process.versions.chrome,
-    node: process.versions.node,
-  },
+/** Subscribes to a push from main; returns the unsubscribe function. */
+function on<T>(channel: string, listener: (value: T) => void): () => void {
+  const handler = (_e: unknown, value: T) => listener(value)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.removeListener(channel, handler)
+}
+
+const api: Api = {
   auth: {
-    getStatus: invoke(IPC.authGetStatus),
-    signIn: invoke(IPC.authSignIn),
-    cancelSignIn: invoke(IPC.authCancelSignIn),
-    signOut: invoke(IPC.authSignOut),
-    onStatusChange(listener) {
-      const handler = (_e: unknown, status: AuthStatus) => listener(status)
-      ipcRenderer.on(IPC.authStatusChanged, handler)
-      return () => ipcRenderer.removeListener(IPC.authStatusChanged, handler)
-    },
+    getStatus: call(IPC.authGetStatus),
+    signIn: call(IPC.authSignIn),
+    cancelSignIn: call(IPC.authCancelSignIn),
+    signOut: call(IPC.authSignOut),
+    onStatusChange: (listener) => on(IPC.authStatusChanged, listener),
   },
-  youtube: {
-    listMyPlaylists: invoke(IPC.youtubeListMyPlaylists),
-  },
-  channels: {
-    search: invoke(IPC.channelsSearch),
-  },
-  quota: {
-    get: invoke(IPC.quotaGet),
-    onChange(listener) {
-      const handler = (_e: unknown, status: QuotaStatus) => listener(status)
-      ipcRenderer.on(IPC.quotaChanged, handler)
-      return () => ipcRenderer.removeListener(IPC.quotaChanged, handler)
-    },
-  },
+  youtube: { listMyPlaylists: call(IPC.listMyPlaylists) },
+  channels: { search: call(IPC.searchChannels) },
   schedulers: {
-    list: invoke(IPC.schedulersList),
-    create: invoke(IPC.schedulersCreate),
-    update: invoke(IPC.schedulersUpdate),
-    setActive: invoke(IPC.schedulersSetActive),
-    remove: invoke(IPC.schedulersRemove),
-    runNow: invoke(IPC.schedulersRunNow),
+    list: call(IPC.schedulersList),
+    create: call(IPC.schedulersCreate),
+    update: call(IPC.schedulersUpdate),
+    setActive: call(IPC.schedulersSetActive),
+    remove: call(IPC.schedulersRemove),
+    runNow: call(IPC.schedulersRunNow),
   },
   runs: {
-    list: invoke(IPC.runsList),
-    onChange(listener) {
-      const handler = () => listener()
-      ipcRenderer.on(IPC.runsChanged, handler)
-      return () => ipcRenderer.removeListener(IPC.runsChanged, handler)
-    },
+    list: call(IPC.runsList),
+    onChange: (listener) => on(IPC.runsChanged, listener),
   },
-  debug: {
-    lookback: invoke(IPC.debugLookback),
-  },
-  app: {
-    getState: invoke(IPC.appGetState),
-    setPaused: invoke(IPC.appSetPaused),
-    onStateChange(listener) {
-      const handler = (_e: unknown, state: AppState) => listener(state)
-      ipcRenderer.on(IPC.appStateChanged, handler)
-      return () => ipcRenderer.removeListener(IPC.appStateChanged, handler)
-    },
+  scans: {
+    isPaused: call(IPC.scansIsPaused),
+    setPaused: call(IPC.scansSetPaused),
+    onPausedChange: (listener) => on(IPC.scansPausedChanged, listener),
   },
 }
 
-contextBridge.exposeInMainWorld('bridge', bridge)
+contextBridge.exposeInMainWorld('api', api)

@@ -1,6 +1,7 @@
+// Runs scans one at a time, records them in the history and notifies the user.
 import { randomUUID } from 'node:crypto'
-import { runScan, type ScanDeps, type ScanResult } from '@auto-yt/core'
-import type { RunDetails, RunView } from '../shared/api'
+import type { RunView } from '../shared/api'
+import { runScan, type ScanDeps } from './core/scan'
 import type { SqliteStorage } from './db/sqlite-storage'
 import { notificationFor, type NotificationText } from './notifications'
 
@@ -8,33 +9,15 @@ export interface RunnerDeps {
   storage: SqliteStorage
   youtube: ScanDeps['client']
   isShort: ScanDeps['isShort']
-  /** Units left today by the app's own count, for the quota warning. */
-  quotaRemaining: () => number
   now: () => Date
   notify: (n: NotificationText) => void
-  /** Called when a run starts or finishes, so the UI can refresh. */
-  onChange: () => void
+  onChange: () => void // a run started or finished
   log?: (message: string, error: unknown) => void
 }
 
-function details(r: ScanResult): RunDetails {
-  return {
-    added: r.added.map((v) => ({
-      id: v.id,
-      title: v.title,
-      publishedAt: v.publishedAt.toISOString(),
-    })),
-    skipped: r.skipped,
-    unavailableChannels: r.unavailableChannels.map((c) => ({ id: c.id, title: c.title })),
-    quotaWarning: r.quotaWarning,
-    deactivated: r.deactivated,
-  }
-}
-
 /**
- * Runs scans one at a time (so they never race for quota), records each one
- * in the run history and notifies the user. Asking to run a scheduler that is
- * already queued or running returns that same run.
+ * Creates a queue that scans one scheduler at a time, so scans never race.
+ * Asking for a scheduler that's already queued returns that same run.
  */
 export function createRunner(deps: RunnerDeps) {
   const { storage } = deps
@@ -42,32 +25,32 @@ export function createRunner(deps: RunnerDeps) {
   const pending = new Map<string, Promise<RunView>>()
 
   async function execute(schedulerId: string, trigger: RunView['trigger']): Promise<RunView> {
-    const scheduler = await storage.getScheduler(schedulerId)
-    if (!scheduler)
-      throw Object.assign(new Error('That scheduler no longer exists.'), { kind: 'validation' })
+    const scheduler = storage.getScheduler(schedulerId)
+    if (!scheduler) throw new Error('That scheduler no longer exists.')
 
     const runId = randomUUID()
     storage.startRun({ id: runId, schedulerId, trigger, startedAt: deps.now() })
     deps.onChange()
-
     try {
-      const result = await runScan(schedulerId, {
-        storage,
-        client: deps.youtube,
-        isShort: deps.isShort,
-        now: deps.now,
-        quotaRemaining: deps.quotaRemaining,
-      })
+      const r = await runScan(schedulerId, { ...deps, client: deps.youtube })
       storage.finishRun(runId, {
-        status: result.status,
-        finishedAt: result.finishedAt,
-        addedCount: result.added.length,
-        error: result.error,
-        details: details(result),
+        status: r.status,
+        finishedAt: r.finishedAt,
+        addedCount: r.added.length,
+        error: r.error,
+        details: {
+          added: r.added.map((v) => ({
+            id: v.id,
+            title: v.title,
+            publishedAt: v.publishedAt.toISOString(),
+          })),
+          skipped: r.skipped,
+          unavailableChannels: r.unavailableChannels.map((c) => ({ id: c.id, title: c.title })),
+          deactivated: r.deactivated,
+        },
       })
     } catch (e) {
-      // A bug, not an API error: record it rather than leave the run "running".
-      deps.log?.(`Scan of ${schedulerId} crashed`, e)
+      deps.log?.(`Scan of ${schedulerId} crashed`, e) // a bug: record it instead of leaving it "running"
       storage.finishRun(runId, {
         status: 'error',
         finishedAt: deps.now(),
@@ -84,19 +67,17 @@ export function createRunner(deps: RunnerDeps) {
   }
 
   return {
-    /** Queue a scan; resolves with the finished run. */
+    /** Queues a scan and resolves with the finished run. */
     run(schedulerId: string, trigger: RunView['trigger'] = 'manual'): Promise<RunView> {
       const existing = pending.get(schedulerId)
       if (existing) return existing
-      const job = tail.then(() => execute(schedulerId, trigger))
-      const tracked = job.finally(() => pending.delete(schedulerId))
-      pending.set(schedulerId, tracked)
-      tail = tracked.catch(() => undefined) // one failure doesn't block the queue
-      return tracked
+      const job = tail
+        .then(() => execute(schedulerId, trigger))
+        .finally(() => pending.delete(schedulerId))
+      pending.set(schedulerId, job)
+      tail = job.catch(() => undefined) // a failed run doesn't block the queue
+      return job
     },
-    isQueued: (schedulerId: string) => pending.has(schedulerId),
-    /** Resolves when every queued scan has finished (for tests and shutdown). */
-    idle: () => tail.then(() => undefined),
   }
 }
 

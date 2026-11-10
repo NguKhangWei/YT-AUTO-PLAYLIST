@@ -1,12 +1,13 @@
+// Channel search box with results, and the chosen channels as removable chips.
 import { Check, Plus, X } from 'lucide-react'
 import { useId, useState } from 'react'
 import type { Channel } from '../../../shared/api'
 import { ChannelAvatar } from '@/components/ChannelAvatar'
 import { Input, Label } from '@/components/ui/input'
-import { MIN_SEARCH_LENGTH, useChannelSearch } from '@/hooks/useChannelSearch'
+import { MIN_SEARCH_LENGTH } from '../../../shared/constants'
+import { useChannelSearch } from '@/hooks/useChannelSearch'
 import { formatSubscribers } from '@/lib/format'
 
-/** Search box with results (avatar, name, @handle, subscribers) and the chosen channels as chips. */
 export function ChannelPicker({
   selected,
   onChange,
@@ -49,14 +50,14 @@ export function ChannelPicker({
           Search failed: {search.message}
         </p>
       )}
-      {search.status === 'done' && search.result.channels.length === 0 && (
+      {search.status === 'done' && search.channels.length === 0 && (
         <p className="text-sm text-muted-foreground" role="status">
           No channels found.
         </p>
       )}
-      {search.status === 'done' && search.result.channels.length > 0 && (
+      {search.status === 'done' && search.channels.length > 0 && (
         <ul aria-label="Search results" className="divide-y rounded-md border">
-          {search.result.channels.map((c) => {
+          {search.channels.map((c) => {
             const isChosen = chosen.has(c.id)
             return (
               <li key={c.id}>

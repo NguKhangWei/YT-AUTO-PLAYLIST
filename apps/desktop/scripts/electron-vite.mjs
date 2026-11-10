@@ -1,7 +1,4 @@
-// Runs electron-vite with ELECTRON_RUN_AS_NODE removed from the environment.
-// Shells spawned by VS Code extensions (and some other Electron hosts) set it,
-// which makes Electron start as plain Node, so `require('electron')` returns a
-// path string and the app crashes on `app.whenReady`.
+// Runs electron-vite without ELECTRON_RUN_AS_NODE, which VS Code terminals set and which breaks Electron.
 import { spawn } from 'node:child_process'
 
 const env = { ...process.env }

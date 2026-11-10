@@ -1,6 +1,7 @@
-import { YouTubeApiError, type YouTubeErrorKind } from '../../src'
-import type { ScanDeps } from '../../src'
-import type { UploadItem, VideoDetails } from '../../src'
+// An in-memory YouTube with just the calls a scan makes, with injectable errors.
+import type { ScanDeps } from '../core/scan'
+import { YouTubeApiError, type YouTubeErrorKind } from '../core/youtube/errors'
+import type { UploadItem, VideoDetails } from '../core/youtube/types'
 
 export interface FakeVideo {
   id: string
@@ -14,10 +15,7 @@ export interface FakeVideo {
   hidden?: boolean
 }
 
-/**
- * An in-memory YouTube with just the calls the scan uses. Playlists hold video
- * ids in insertion order. `queueInsertResults` / `failOn` inject API errors.
- */
+/** Playlists hold video ids in insertion order. */
 export function fakeYouTube(videos: FakeVideo[], playlists: Record<string, string[]> = {}) {
   const lists = new Map(Object.entries(playlists).map(([k, v]) => [k, [...v]]))
   const goneUploads = new Set<string>()

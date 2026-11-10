@@ -1,7 +1,7 @@
+// A channel picture, or its first letter when it has none.
 import type { Channel } from '../../../shared/api'
 import { cn } from '@/lib/utils'
 
-/** Channel picture, or its first letter when YouTube has none. */
 export function ChannelAvatar({ channel, className }: { channel: Channel; className?: string }) {
   return channel.thumbnailUrl ? (
     <img

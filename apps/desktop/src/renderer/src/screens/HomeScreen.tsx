@@ -1,19 +1,23 @@
+// Main screen: the scheduler list, the History tab and the scheduler editor.
 import { Pause, Play, Plus } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
-import type { AuthStatus, Playlist, SchedulerView } from '../../../shared/api'
+import { useEffect, useState } from 'react'
+import type { Api, AuthStatus, SchedulerView } from '../../../shared/api'
 import { AccountHeader } from '@/components/AccountHeader'
 import { RunHistory } from '@/components/RunHistory'
 import { SchedulerCard } from '@/components/SchedulerCard'
 import { SchedulerEditor } from '@/components/SchedulerEditor'
 import { Button } from '@/components/ui/button'
-import { useAppState } from '@/hooks/useAppState'
+import { useLive } from '@/hooks/useLive'
 import { useApi } from '@/lib/api'
 
 type Editor = { mode: 'closed' } | { mode: 'create' } | { mode: 'edit'; scheduler: SchedulerView }
-type Tab = 'schedulers' | 'history'
 
-/** Show the development-only "look back" button (Vite sets DEV for `npm run dev` and tests). */
-const SHOW_DEBUG = import.meta.env.DEV
+const listSchedulers = (api: Api) => api.schedulers.list()
+const listPlaylists = (api: Api) => api.youtube.listMyPlaylists()
+const isPaused = (api: Api) => api.scans.isPaused()
+const watchRuns = (api: Api, reload: () => void) => api.runs.onChange(() => reload())
+const watchPaused = (api: Api, onChange: (paused?: boolean) => void) =>
+  api.scans.onPausedChange(onChange)
 
 export function HomeScreen({
   status,
@@ -23,69 +27,30 @@ export function HomeScreen({
   onStatus: (s: AuthStatus) => void
 }) {
   const api = useApi()
-  const [schedulers, setSchedulers] = useState<SchedulerView[] | null>(null)
-  const [playlists, setPlaylists] = useState<Playlist[] | null>(null)
-  const [playlistsError, setPlaylistsError] = useState<string>()
-  const [error, setError] = useState<string | null>(null)
+  const schedulers = useLive(listSchedulers, watchRuns) // scans change "last scan" and may turn one off
+  const playlists = useLive(listPlaylists)
+  const paused = useLive(isPaused, watchPaused)
   const [editor, setEditor] = useState<Editor>({ mode: 'closed' })
-  const [tab, setTab] = useState<Tab>('schedulers')
-  /** Scans started from this window that haven't finished yet. */
-  const [starting, setStarting] = useState<Set<string>>(() => new Set())
-  const [notice, setNotice] = useState<string | null>(null)
+  const [tab, setTab] = useState<'schedulers' | 'history'>('schedulers')
+  const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
+  const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => new Date())
-  const appState = useAppState()
-  const paused = appState.state?.paused ?? false
 
-  /** Fetch playlists; `apply` receives the result so callers decide whether it's still wanted. */
-  const fetchPlaylists = useCallback(
-    (apply: (playlists: Playlist[], error?: string) => void) =>
-      api.youtube.listMyPlaylists().then(
-        (p) => apply(p),
-        (e: Error) => apply([], e.message),
-      ),
-    [api],
-  )
-
-  const applyPlaylists = (p: Playlist[], err?: string) => {
-    setPlaylists(p)
-    setPlaylistsError(err)
-  }
-
-  // Initial load. State is set in promise callbacks, and skipped after unmount.
   useEffect(() => {
-    let alive = true
-    api.schedulers.list().then(
-      (s) => alive && setSchedulers(s),
-      (e: Error) => alive && setError(e.message),
-    )
-    void fetchPlaylists((p, err) => {
-      if (!alive) return
-      setPlaylists(p)
-      setPlaylistsError(err)
-    })
-    // Scans change "last scan" and may turn a scheduler off: reload when one starts or ends.
-    const off = api.runs.onChange(() => {
-      api.schedulers.list().then(
-        (s) => alive && setSchedulers(s),
-        () => undefined,
-      )
-    })
-    // Keep "5 min ago" labels fresh.
-    const tick = setInterval(() => alive && setNow(new Date()), 30_000)
-    return () => {
-      alive = false
-      off()
-      clearInterval(tick)
-    }
-  }, [api, fetchPlaylists])
-
-  /** Re-fetch when opening the editor, so playlists made on YouTube meanwhile show up. */
-  const loadPlaylists = () => void fetchPlaylists(applyPlaylists)
+    const timer = setInterval(() => setNow(new Date()), 30_000) // keeps "5 min ago" fresh
+    return () => clearInterval(timer)
+  }, [])
 
   const replace = (s: SchedulerView) =>
-    setSchedulers((list) => list?.map((x) => (x.id === s.id ? s : x)) ?? [s])
+    schedulers.setValue((list) => {
+      if (!list) return [s]
+      return list.some((x) => x.id === s.id)
+        ? list.map((x) => (x.id === s.id ? s : x))
+        : [...list, s]
+    })
 
-  const run = async (action: () => Promise<void>) => {
+  /** Runs a user action, showing its error message if it fails. */
+  const attempt = async (action: () => Promise<unknown>) => {
     setError(null)
     try {
       await action()
@@ -95,42 +60,30 @@ export function HomeScreen({
   }
 
   const runNow = (s: SchedulerView) =>
-    run(async () => {
-      setNotice(null)
+    attempt(async () => {
       setStarting((ids) => new Set(ids).add(s.id))
       try {
-        const result = await api.schedulers.runNow(s.id)
-        setSchedulers(
-          (list) => list?.map((x) => (x.id === s.id ? { ...x, lastRun: result } : x)) ?? null,
-        )
+        replace({ ...s, lastRun: await api.schedulers.runNow(s.id) })
         setNow(new Date())
       } finally {
-        setStarting((ids) => {
-          const next = new Set(ids)
-          next.delete(s.id)
-          return next
-        })
+        setStarting((ids) => new Set([...ids].filter((id) => id !== s.id)))
       }
     })
 
-  const debugLookback = (s: SchedulerView) =>
-    run(async () => {
-      await api.debug.lookback(s.id, 7)
-      setNotice(`"${s.name}" will treat uploads from the last 7 days as new. Use Run now.`)
-    })
-
   const remove = (s: SchedulerView) =>
-    run(async () => {
-      if (
-        !window.confirm(
-          `Delete "${s.name}"? Its tracked channels and history are removed too. The playlist itself is not touched.`,
-        )
-      )
-        return
+    attempt(async () => {
+      const message = `Delete "${s.name}"? Its tracked channels and history are removed too. The playlist itself is not touched.`
+      if (!window.confirm(message)) return
       await api.schedulers.remove(s.id)
-      setSchedulers((list) => list?.filter((x) => x.id !== s.id) ?? [])
+      schedulers.setValue((list) => list?.filter((x) => x.id !== s.id) ?? [])
     })
 
+  const openEditor = (next: Editor) => {
+    void playlists.reload() // picks up playlists made on YouTube meanwhile
+    setEditor(next)
+  }
+
+  const list = schedulers.value
   return (
     <div className="flex min-h-screen flex-col">
       <AccountHeader
@@ -158,23 +111,28 @@ export function HomeScreen({
           </div>
           {tab === 'schedulers' && (
             <div className="flex gap-2">
-              {appState.state && (
+              {paused.value !== null && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => void run(() => appState.setPaused(!paused))}
+                  onClick={() =>
+                    void attempt(async () =>
+                      paused.setValue(await api.scans.setPaused(!paused.value)),
+                    )
+                  }
                 >
-                  {paused ? <Play /> : <Pause />} {paused ? 'Resume scans' : 'Pause scans'}
+                  {paused.value ? <Play /> : <Pause />}{' '}
+                  {paused.value ? 'Resume scans' : 'Pause scans'}
                 </Button>
               )}
-              <Button size="sm" onClick={() => setEditor({ mode: 'create' })}>
+              <Button size="sm" onClick={() => openEditor({ mode: 'create' })}>
                 <Plus /> New scheduler
               </Button>
             </div>
           )}
         </div>
 
-        {paused && (
+        {paused.value && (
           <p
             role="status"
             className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
@@ -185,44 +143,34 @@ export function HomeScreen({
         {tab === 'history' && <RunHistory />}
         {tab === 'schedulers' && (
           <>
-            {error && (
+            {(error ?? schedulers.error) && (
               <p role="alert" className="mb-4 text-sm text-destructive">
-                {error}
+                {error ?? schedulers.error}
               </p>
             )}
-            {notice && (
-              <p role="status" className="mb-4 text-sm text-muted-foreground">
-                {notice}
-              </p>
+            {list === null && !schedulers.error && (
+              <p className="text-sm text-muted-foreground">Loading…</p>
             )}
-            {schedulers === null && <p className="text-sm text-muted-foreground">Loading…</p>}
-            {schedulers?.length === 0 && (
+            {list?.length === 0 && (
               <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
                 No schedulers yet. Create one to start filling a playlist automatically.
               </p>
             )}
-            {schedulers && schedulers.length > 0 && (
+            {list && list.length > 0 && (
               <ul className="grid gap-3">
-                {schedulers.map((s) => (
+                {list.map((s) => (
                   <SchedulerCard
                     key={s.id}
                     scheduler={s}
                     now={now}
                     running={starting.has(s.id) || s.lastRun?.status === 'running'}
                     onRunNow={() => void runNow(s)}
-                    playlistMissing={
-                      playlists !== null &&
-                      !playlistsError &&
-                      !playlists.some((p) => p.id === s.playlistId)
-                    }
-                    onDebugLookback={SHOW_DEBUG ? () => void debugLookback(s) : undefined}
                     onToggle={(active) =>
-                      void run(async () => replace(await api.schedulers.setActive(s.id, active)))
+                      void attempt(async () =>
+                        replace(await api.schedulers.setActive(s.id, active)),
+                      )
                     }
-                    onEdit={() => {
-                      loadPlaylists()
-                      setEditor({ mode: 'edit', scheduler: s })
-                    }}
+                    onEdit={() => openEditor({ mode: 'edit', scheduler: s })}
                     onDelete={() => void remove(s)}
                   />
                 ))}
@@ -235,16 +183,12 @@ export function HomeScreen({
       {editor.mode !== 'closed' && (
         <SchedulerEditor
           editing={editor.mode === 'edit' ? editor.scheduler : undefined}
-          playlists={playlists}
-          playlistsError={playlistsError}
-          schedulers={schedulers ?? []}
+          playlists={playlists.value}
+          playlistsError={playlists.error}
+          schedulers={list ?? []}
           onClose={() => setEditor({ mode: 'closed' })}
           onSaved={(saved) => {
-            setSchedulers((list) =>
-              list?.some((x) => x.id === saved.id)
-                ? list.map((x) => (x.id === saved.id ? saved : x))
-                : [...(list ?? []), saved],
-            )
+            replace(saved)
             setEditor({ mode: 'closed' })
           }}
         />
