@@ -29,3 +29,13 @@ export { YouTubeApiError, toYouTubeError, type YouTubeErrorKind } from './youtub
 export { DAILY_QUOTA, QUOTA_COSTS, quotaDay, type ApiMethod } from './youtube/quota'
 export { parseChannelInput, resolveChannel, type ChannelInput } from './youtube/resolve'
 export type { Channel, Playlist, UploadItem, VideoDetails } from './youtube/types'
+export type { ScanStorage, SchedulerRecord, TrackedChannel } from './ports'
+export { createMemoryStorage, type MemoryStorage } from './storage/memory'
+export {
+  OVERLAP_MS,
+  runScan,
+  type ScanDeps,
+  type ScanResult,
+  type ScanSkipReason,
+  type ScanStatus,
+} from './scan'
