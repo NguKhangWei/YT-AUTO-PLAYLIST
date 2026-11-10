@@ -6,7 +6,9 @@
     "types": ["vite/client"],
     "paths": {
       "@/*": ["./src/renderer/src/*"]
-    }
+    },
+    "composite": true,
+    "tsBuildInfoFile": "./out/tsbuildinfo/tsconfig.web.tsbuildinfo"
   },
-  "include": ["src/renderer/src", "src/shared"]
+  "include": ["src/renderer/src", "src/shared", "src/main/core/youtube/types.ts"]
 }
