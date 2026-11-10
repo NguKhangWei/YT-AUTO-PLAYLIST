@@ -1,5 +1,8 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron'
+import { createGoogleAuth } from './auth/google-auth'
+import { createEncryptedFileStore } from './auth/token-store'
+import { registerIpc } from './ipc'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -35,6 +38,14 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  const auth = createGoogleAuth({
+    clientId: import.meta.env.MAIN_VITE_GOOGLE_CLIENT_ID,
+    clientSecret: import.meta.env.MAIN_VITE_GOOGLE_CLIENT_SECRET,
+    store: createEncryptedFileStore(join(app.getPath('userData'), 'auth.bin'), safeStorage),
+    openExternal: (url) => shell.openExternal(url),
+  })
+  registerIpc({ ipcMain, auth, getWindows: () => BrowserWindow.getAllWindows() })
+
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

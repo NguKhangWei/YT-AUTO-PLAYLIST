@@ -8,6 +8,8 @@ const bundleWorkspace = { exclude: ['@auto-yt/core'] }
 
 export default defineConfig({
   main: {
+    // Read MAIN_VITE_* from the repo-root .env (one place for all config).
+    envDir: resolve('../..'),
     build: { externalizeDeps: bundleWorkspace },
   },
   preload: {

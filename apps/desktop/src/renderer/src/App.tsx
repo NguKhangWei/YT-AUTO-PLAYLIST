@@ -1,21 +1,21 @@
-import { DEFAULT_TIMEZONE } from '@auto-yt/core'
-import { Button } from '@/components/ui/button'
+import { useAuthStatus } from '@/hooks/useAuthStatus'
+import { HomeScreen } from '@/screens/HomeScreen'
+import { SetupScreen } from '@/screens/SetupScreen'
+import { SignInScreen } from '@/screens/SignInScreen'
 
+/** Routes between setup, sign-in and the main screen based on auth status. */
 export function App() {
-  const versions = window.api?.versions
+  const { status, error, update } = useAuthStatus()
 
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-8 text-foreground">
-      <h1 className="text-3xl font-semibold tracking-tight">auto-yt</h1>
-      <p className="text-muted-foreground">
-        Scaffold ready. Default time zone: <span className="font-mono">{DEFAULT_TIMEZONE}</span>
+  if (error) {
+    return (
+      <p role="alert" className="p-8 text-destructive">
+        Couldn&apos;t start: {error}
       </p>
-      <Button disabled>Sign in with Google (coming in M5)</Button>
-      {versions && (
-        <p className="text-xs text-muted-foreground">
-          Electron {versions.electron} · Chrome {versions.chrome} · Node {versions.node}
-        </p>
-      )}
-    </main>
-  )
+    )
+  }
+  if (!status) return null
+  if (!status.configured) return <SetupScreen />
+  if (!status.signedIn) return <SignInScreen status={status} onSignedIn={update} />
+  return <HomeScreen status={status} onStatus={update} />
 }
