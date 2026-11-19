@@ -33,9 +33,9 @@ describe('sqlite storage', () => {
     )
   })
 
-  it('rejects intervals outside 1–30 days at the database level', () => {
+  it('rejects minutes outside 0–59 at the database level', () => {
     const s = setup()
-    expect(() => s.insertScheduler(scheduler('a', { intervalDays: 31 }))).toThrow(/CHECK/)
+    expect(() => s.insertScheduler(scheduler('a', { minuteOfHour: 60 }))).toThrow(/CHECK/)
   })
 
   it('lists schedulers oldest first and saves edits', () => {
@@ -44,7 +44,7 @@ describe('sqlite storage', () => {
     s.insertScheduler(scheduler('a', { playlistId: 'PL-a', createdAt: new Date(1000) }))
     expect(s.listSchedulers().map((x) => x.id)).toEqual(['a', 'b'])
 
-    const edited = { ...s.listSchedulers()[0]!, name: 'Renamed', intervalDays: 7 }
+    const edited = { ...s.listSchedulers()[0]!, name: 'Renamed', minuteOfHour: 45 }
     s.saveScheduler(edited)
     expect(s.listSchedulers()[0]).toEqual(edited)
   })
@@ -111,6 +111,46 @@ describe('upgrading an existing database', () => {
     const s = createSqliteStorage(db)
     expect((await s.getScheduler('old'))?.name).toBe('Scheduler old')
     expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: MIGRATIONS.length })
+  })
+
+  it('moves a v5 database to hourly scans, keeping channels, handled videos and history', async () => {
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(':memory:')
+    db.exec('PRAGMA foreign_keys = ON')
+    for (const m of MIGRATIONS.slice(0, 5)) db.exec(m)
+    db.exec('PRAGMA user_version = 5')
+    // Two schedulers shaped like yours: one daily at 09:30, one every 3 days at 21:00.
+    db.exec(`
+      INSERT INTO schedulers VALUES
+        ('a', 'INFORMATIVE', 'PL-a', 'Informative', 1, '09:30', 'Asia/Kuala_Lumpur', 1, 0, 5, 9e12),
+        ('b', 'Fun', 'PL-b', 'Fun', 3, '21:00', 'Asia/Kuala_Lumpur', 0, 1, NULL, 9e12);
+      INSERT INTO channels (channel_id, title, uploads_playlist_id) VALUES ('UC1', 'One', 'UU1');
+      INSERT INTO scheduler_channels VALUES ('a', 'UC1', 7);
+      INSERT INTO handled_videos VALUES ('a', 'v1', 8);
+      INSERT INTO runs (id, scheduler_id, trigger, status, started_at)
+        VALUES ('r1', 'a', 'manual', 'ok', 9);
+    `)
+
+    const before = Date.now()
+    migrate(db)
+    const after = Date.now()
+    const s = createSqliteStorage(db)
+
+    const [a, b] = s.listSchedulers()
+    expect(a).toMatchObject({ id: 'a', minuteOfHour: 30, active: true })
+    expect(a?.lastSuccessAt?.getTime()).toBe(5)
+    expect(b).toMatchObject({ id: 'b', minuteOfHour: 0, active: false })
+    for (const x of [a!, b!]) {
+      // Next run: the minute's next occurrence, not the old far-future daily slot.
+      expect(x.nextRunAt.getUTCMinutes()).toBe(x.minuteOfHour)
+      expect(x.nextRunAt.getTime()).toBeGreaterThan(before - 1000)
+      expect(x.nextRunAt.getTime()).toBeLessThanOrEqual(after + 3_600_000)
+    }
+    expect(Object.keys(db.prepare('SELECT * FROM schedulers').get()!)).not.toContain('timezone')
+    // Nothing cascaded away.
+    expect(s.listTrackedChannels('a').map((t) => t.channel.id)).toEqual(['UC1'])
+    expect(s.listHandledVideoIds('a')).toEqual(new Set(['v1']))
+    expect(s.listRuns({ schedulerId: 'a' }).map((r) => r.id)).toEqual(['r1'])
   })
 })
 

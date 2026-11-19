@@ -1,31 +1,19 @@
 // Dialog for creating or editing a scheduler.
 import { useId, useMemo, useState, type FormEvent } from 'react'
 import type { Playlist, SchedulerInput, SchedulerView } from '../../../shared/api'
-import {
-  DEFAULT_TIMEZONE,
-  MAX_INTERVAL_DAYS,
-  MAX_NAME_LENGTH,
-  MIN_INTERVAL_DAYS,
-} from '../../../shared/constants'
+import { MAX_NAME_LENGTH, SCANS_PER_DAY } from '../../../shared/constants'
+import { plural } from '../../../shared/format'
 import { ChannelPicker } from '@/components/ChannelPicker'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input, Label, NativeSelect } from '@/components/ui/input'
 import { useApi } from '@/lib/api'
-import { intervalLabel, timeZones } from '@/lib/format'
-
-const INTERVALS = Array.from(
-  { length: MAX_INTERVAL_DAYS - MIN_INTERVAL_DAYS + 1 },
-  (_, i) => i + MIN_INTERVAL_DAYS,
-)
 
 const blank = (): SchedulerInput => ({
   name: '',
   playlistId: '',
   playlistTitle: '',
-  intervalDays: 1,
-  timeOfDay: '09:00',
-  timezone: DEFAULT_TIMEZONE,
+  minuteOfHour: 0,
   channels: [],
 })
 
@@ -49,16 +37,13 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
           name: editing.name,
           playlistId: editing.playlistId,
           playlistTitle: editing.playlistTitle,
-          intervalDays: editing.intervalDays,
-          timeOfDay: editing.timeOfDay,
-          timezone: editing.timezone,
+          minuteOfHour: editing.minuteOfHour,
           channels: editing.channels,
         }
       : blank(),
   )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const zones = useMemo(() => timeZones(DEFAULT_TIMEZONE), [])
 
   const takenBy = useMemo(() => {
     const m = new Map<string, string>()
@@ -152,45 +137,22 @@ export function SchedulerEditor(props: SchedulerEditorProps) {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-1.5">
-              <Label htmlFor={`${ids}-interval`}>Scan</Label>
-              <NativeSelect
-                id={`${ids}-interval`}
-                value={form.intervalDays}
-                onChange={(e) => set('intervalDays', Number(e.target.value))}
-              >
-                {INTERVALS.map((d) => (
-                  <option key={d} value={d}>
-                    {intervalLabel(d)}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor={`${ids}-time`}>At</Label>
-              <Input
-                id={`${ids}-time`}
-                type="time"
-                value={form.timeOfDay}
-                onChange={(e) => set('timeOfDay', e.target.value)}
-              />
-            </div>
-          </div>
-
           <div className="grid gap-1.5">
-            <Label htmlFor={`${ids}-tz`}>Time zone</Label>
+            <Label htmlFor={`${ids}-minute`}>Scan every hour at minute</Label>
             <Input
-              id={`${ids}-tz`}
-              list={`${ids}-zones`}
-              value={form.timezone}
-              onChange={(e) => set('timezone', e.target.value)}
+              id={`${ids}-minute`}
+              type="number"
+              min={0}
+              max={59}
+              step={1}
+              className="w-24"
+              value={Number.isNaN(form.minuteOfHour) ? '' : form.minuteOfHour}
+              onChange={(e) => set('minuteOfHour', e.target.valueAsNumber)}
             />
-            <datalist id={`${ids}-zones`}>
-              {zones.map((z) => (
-                <option key={z} value={z} />
-              ))}
-            </datalist>
+            <p className="text-xs text-muted-foreground">
+              About {plural(form.channels.length * SCANS_PER_DAY, 'quota unit')} a day when nothing
+              is new (1 per channel per scan), plus 50 for each video added.
+            </p>
           </div>
 
           <ChannelPicker

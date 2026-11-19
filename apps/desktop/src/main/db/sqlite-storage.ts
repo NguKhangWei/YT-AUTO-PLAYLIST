@@ -10,9 +10,7 @@ export interface SchedulerRecord {
   name: string
   playlistId: string
   playlistTitle: string
-  intervalDays: number
-  timeOfDay: string
-  timezone: string
+  minuteOfHour: number // scans at this minute past every hour (UTC)
   active: boolean
   createdAt: Date
   lastSuccessAt?: Date // start of the last fully successful scan
@@ -29,9 +27,7 @@ interface SchedulerRow {
   name: string
   playlist_id: string
   playlist_title: string
-  interval_days: number
-  time_of_day: string
-  timezone: string
+  minute_of_hour: number
   active: number
   created_at: number
   last_success_at: number | null
@@ -67,9 +63,7 @@ const toScheduler = (r: SchedulerRow): SchedulerRecord => ({
   name: r.name,
   playlistId: r.playlist_id,
   playlistTitle: r.playlist_title,
-  intervalDays: r.interval_days,
-  timeOfDay: r.time_of_day,
-  timezone: r.timezone,
+  minuteOfHour: r.minute_of_hour,
   active: r.active === 1,
   createdAt: new Date(r.created_at),
   ...(r.last_success_at !== null ? { lastSuccessAt: new Date(r.last_success_at) } : {}),
@@ -108,9 +102,7 @@ const schedulerParams = (s: SchedulerRecord): Record<string, SQLInputValue> => (
   name: s.name,
   playlist_id: s.playlistId,
   playlist_title: s.playlistTitle,
-  interval_days: s.intervalDays,
-  time_of_day: s.timeOfDay,
-  timezone: s.timezone,
+  minute_of_hour: s.minuteOfHour,
   active: s.active ? 1 : 0,
   created_at: s.createdAt.getTime(),
   last_success_at: s.lastSuccessAt?.getTime() ?? null,
@@ -126,14 +118,13 @@ export function createSqliteStorage(db: DatabaseSync) {
     getScheduler: db.prepare('SELECT * FROM schedulers WHERE id = ?'),
     listSchedulers: db.prepare('SELECT * FROM schedulers ORDER BY created_at, id'),
     insertScheduler: db.prepare(`
-      INSERT INTO schedulers (id, name, playlist_id, playlist_title, interval_days, time_of_day,
-        timezone, active, created_at, last_success_at, next_run_at)
-      VALUES (:id, :name, :playlist_id, :playlist_title, :interval_days, :time_of_day,
-        :timezone, :active, :created_at, :last_success_at, :next_run_at)`),
+      INSERT INTO schedulers (id, name, playlist_id, playlist_title, minute_of_hour, active,
+        created_at, last_success_at, next_run_at)
+      VALUES (:id, :name, :playlist_id, :playlist_title, :minute_of_hour, :active,
+        :created_at, :last_success_at, :next_run_at)`),
     updateScheduler: db.prepare(`
       UPDATE schedulers SET name = :name, playlist_id = :playlist_id,
-        playlist_title = :playlist_title, interval_days = :interval_days,
-        time_of_day = :time_of_day, timezone = :timezone, active = :active,
+        playlist_title = :playlist_title, minute_of_hour = :minute_of_hour, active = :active,
         created_at = :created_at, last_success_at = :last_success_at, next_run_at = :next_run_at
       WHERE id = :id`),
     deleteScheduler: db.prepare('DELETE FROM schedulers WHERE id = ?'),

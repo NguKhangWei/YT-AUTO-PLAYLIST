@@ -19,9 +19,7 @@ export interface SchedulerInput {
   name: string
   playlistId: string
   playlistTitle: string
-  intervalDays: number
-  timeOfDay: string // "HH:mm"
-  timezone: string
+  minuteOfHour: number // scans every hour at this minute (0–59, UTC)
   channels: Channel[]
 }
 

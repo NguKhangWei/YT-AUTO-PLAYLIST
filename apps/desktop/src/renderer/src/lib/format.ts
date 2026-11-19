@@ -1,16 +1,7 @@
 // Text formatting for the window.
 import { plural } from '../../../shared/format'
 
-export { formatInZone } from '../../../shared/format'
-
-export function intervalLabel(days: number): string {
-  return days === 1 ? 'Every day' : `Every ${days} days`
-}
-
-/** Every IANA time zone, with `first` at the top. */
-export function timeZones(first: string): string[] {
-  return [first, ...Intl.supportedValuesOf('timeZone').filter((z) => z !== first)]
-}
+export { formatTime, scheduleLabel } from '../../../shared/format'
 
 /** "1.3M subscribers", or undefined when the count is hidden. */
 export function formatSubscribers(count: number | undefined): string | undefined {

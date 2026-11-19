@@ -9,15 +9,12 @@ const input = (over: Partial<SchedulerInput> = {}): SchedulerInput => ({
   name: 'Gaming',
   playlistId: 'PL1',
   playlistTitle: 'Gaming videos',
-  intervalDays: 1,
-  timeOfDay: '09:00',
-  timezone: 'Asia/Kuala_Lumpur',
+  minuteOfHour: 30,
   channels: [],
   ...over,
 })
 
 function setup(nowIso = '2026-11-10T00:00:00Z') {
-  // 2026-11-10T00:00Z is 08:00 in Malaysia Time.
   let now = new Date(nowIso)
   const storage = createSqliteStorage(openDatabase(':memory:'))
   const service = createSchedulerService({ storage, now: () => now })
@@ -25,14 +22,14 @@ function setup(nowIso = '2026-11-10T00:00:00Z') {
 }
 
 describe('create', () => {
-  it('saves an active scheduler whose first run is the next occurrence of its time', async () => {
+  it('saves an active scheduler whose first run is the next occurrence of its minute', async () => {
     const { service } = setup()
     const s = await service.create(input({ name: '  Gaming  ' }))
     expect(s).toMatchObject({
       name: 'Gaming',
       active: true,
       createdAt: '2026-11-10T00:00:00.000Z',
-      nextRunAt: '2026-11-10T01:00:00.000Z', // 09:00 MYT today
+      nextRunAt: '2026-11-10T00:30:00.000Z', // :30 this hour
       channels: [],
     })
     expect(s.lastSuccessAt).toBeUndefined()
@@ -43,9 +40,8 @@ describe('create', () => {
     [{ name: '   ' }, /name/],
     [{ name: 'x'.repeat(81) }, /80 characters/],
     [{ playlistId: '' }, /playlist/],
-    [{ intervalDays: 0 }, /1 to 30/],
-    [{ timeOfDay: '25:00' }, /HH:mm/],
-    [{ timezone: 'Mars/Base' }, /time zone/],
+    [{ minuteOfHour: 60 }, /0 to 59/],
+    [{ minuteOfHour: Number.NaN }, /0 to 59/],
   ])('rejects %o', async (over, message) => {
     const { service } = setup()
     expect(() => service.create(input(over))).toThrow(message)
@@ -62,7 +58,7 @@ describe('update', () => {
   it('keeps the next run when only the name or playlist changes', async () => {
     const t = setup()
     const s = await t.service.create(input())
-    t.setNow('2026-11-10T00:30:00Z')
+    t.setNow('2026-11-10T00:20:00Z')
     const u = await t.service.update(
       s.id,
       input({ name: 'Games', playlistId: 'PL9', playlistTitle: 'New' }),
@@ -75,24 +71,16 @@ describe('update', () => {
     })
   })
 
-  it('restarts the cadence when interval, time or time zone change', async () => {
+  it('moves the next run to the new minute when the minute changes', () => {
     const t = setup()
-    const s = await t.service.create(input())
-    t.setNow('2026-11-10T02:00:00Z') // 10:00 MYT: 09:00 today has passed
-    expect((await t.service.update(s.id, input({ intervalDays: 3 }))).nextRunAt).toBe(
-      '2026-11-11T01:00:00.000Z',
+    const s = t.service.create(input()) // next run 00:30
+    t.setNow('2026-11-10T00:20:00Z')
+    expect(t.service.update(s.id, input({ minuteOfHour: 45 })).nextRunAt).toBe(
+      '2026-11-10T00:45:00.000Z',
     )
-    expect(
-      (await t.service.update(s.id, input({ intervalDays: 3, timeOfDay: '18:30' }))).nextRunAt,
-    ).toBe('2026-11-10T10:30:00.000Z')
-    expect(
-      (
-        await t.service.update(
-          s.id,
-          input({ intervalDays: 3, timeOfDay: '18:30', timezone: 'UTC' }),
-        )
-      ).nextRunAt,
-    ).toBe('2026-11-10T18:30:00.000Z')
+    expect(t.service.update(s.id, input({ minuteOfHour: 10 })).nextRunAt).toBe(
+      '2026-11-10T01:10:00.000Z', // :10 has passed this hour
+    )
   })
 
   it('may keep its own playlist but not take another scheduler’s', () => {
@@ -125,9 +113,9 @@ describe('setActive', () => {
       nextRunAt: s.nextRunAt,
     })
 
-    t.setNow('2026-11-15T03:00:00Z') // 11:00 MYT, days later
+    t.setNow('2026-11-15T03:40:00Z') // days later
     const on = t.service.setActive(s.id, true)
-    expect(on).toMatchObject({ active: true, nextRunAt: '2026-11-16T01:00:00.000Z' })
+    expect(on).toMatchObject({ active: true, nextRunAt: '2026-11-15T04:30:00.000Z' })
     expect(t.service.setActive(s.id, true)).toEqual(on) // no-op
   })
 })

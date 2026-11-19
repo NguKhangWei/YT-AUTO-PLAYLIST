@@ -2,6 +2,9 @@ import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
+// Times are shown in local time; pin the zone so tests pass on any machine.
+process.env.TZ = 'Asia/Kuala_Lumpur'
+
 // Test config. Renderer tests opt into jsdom with a `// @vitest-environment jsdom` comment.
 export default defineConfig({
   plugins: [react()],

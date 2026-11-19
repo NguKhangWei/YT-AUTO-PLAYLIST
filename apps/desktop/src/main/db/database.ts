@@ -88,6 +88,22 @@ export const MIGRATIONS: string[] = [
   DROP TABLE search_cache;
   DROP TABLE quota_usage;
   `,
+  // 6: hourly scans. Columns change in place (no table rebuild: dropping the
+  // table would cascade-delete channels, history and handled videos). Each
+  // scheduler keeps the minute of its old time and next scans at that minute.
+  `
+  ALTER TABLE schedulers ADD COLUMN minute_of_hour INTEGER NOT NULL DEFAULT 0
+    CHECK (minute_of_hour BETWEEN 0 AND 59);
+  UPDATE schedulers SET minute_of_hour = CAST(substr(time_of_day, 4, 2) AS INTEGER);
+  UPDATE schedulers SET next_run_at = (
+    SELECT hour_start + minute_of_hour * 60000
+      + CASE WHEN hour_start + minute_of_hour * 60000 <= now THEN 3600000 ELSE 0 END
+    FROM (SELECT now, now - now % 3600000 AS hour_start
+          FROM (SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER) AS now)));
+  ALTER TABLE schedulers DROP COLUMN interval_days;
+  ALTER TABLE schedulers DROP COLUMN time_of_day;
+  ALTER TABLE schedulers DROP COLUMN timezone;
+  `,
 ]
 
 /** Applies pending migrations, each in its own transaction. */

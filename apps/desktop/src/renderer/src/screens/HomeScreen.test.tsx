@@ -41,13 +41,16 @@ afterEach(() => {
 })
 
 describe('scheduler list', () => {
-  it('shows each scheduler with its playlist, schedule and next scan in its own zone', async () => {
+  it('shows each scheduler with its playlist, schedule and next scan in local time', async () => {
     renderHome({
-      schedulers: [view(), view({ id: 's2', name: 'Off one', playlistId: 'PL2', active: false })],
+      schedulers: [
+        view({ minuteOfHour: 5 }),
+        view({ id: 's2', name: 'Off one', playlistId: 'PL2', active: false }),
+      ],
     })
     const card = await screen.findByRole('listitem', { name: 'Gaming' })
     expect(within(card).getByText('→ Gaming videos')).toBeTruthy()
-    expect(within(card).getByText('Every day at 09:00 (Asia/Kuala_Lumpur)')).toBeTruthy()
+    expect(within(card).getByText('Every hour at :05')).toBeTruthy()
     // 2026-11-11T01:00Z is 09:00 on Wed 11 Nov in Malaysia Time.
     expect(within(card).getByText('Wed 11 Nov, 09:00')).toBeTruthy()
     expect(within(card).getByText('None yet')).toBeTruthy()
@@ -85,17 +88,17 @@ describe('scheduler list', () => {
 })
 
 describe('scheduler editor', () => {
-  it('creates a scheduler with defaults (daily, 09:00, Malaysia Time)', async () => {
+  it('creates an hourly scheduler (default minute :00)', async () => {
     const { api } = renderHome()
     fireEvent.click(await screen.findByRole('button', { name: 'New scheduler' }))
-    expect((field('Time zone') as HTMLInputElement).value).toBe('Asia/Kuala_Lumpur')
-    expect((field('At') as HTMLInputElement).value).toBe('09:00')
+    const minute = 'Scan every hour at minute'
+    expect((field(minute) as HTMLInputElement).value).toBe('0')
+    expect(within(dialog()).queryByLabelText('Time zone')).toBeNull()
 
     change('Name', 'Learning')
     await within(dialog()).findByRole('option', { name: 'Learning' })
     change('Playlist', 'PL2')
-    change('Scan', '3')
-    change('At', '21:15')
+    change(minute, '15')
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Create' }))
 
     expect(await screen.findByRole('listitem', { name: 'Learning' })).toBeTruthy()
@@ -103,21 +106,17 @@ describe('scheduler editor', () => {
       name: 'Learning',
       playlistId: 'PL2',
       playlistTitle: 'Learning',
-      intervalDays: 3,
-      timeOfDay: '21:15',
-      timezone: 'Asia/Kuala_Lumpur',
+      minuteOfHour: 15,
       channels: [],
     })
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('offers every interval from 1 to 30 days', async () => {
-    renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'New scheduler' }))
-    const options = within(field('Scan')).getAllByRole('option')
-    expect(options).toHaveLength(30)
-    expect(options[0]?.textContent).toBe('Every day')
-    expect(options[29]?.textContent).toBe('Every 30 days')
+  it('estimates the daily quota from the channel count', async () => {
+    const ch = (id: string) => ({ id, title: id, uploadsPlaylistId: `UU${id}` })
+    renderHome({ schedulers: [view({ channels: [ch('a'), ch('b'), ch('c')] })] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(within(dialog()).getByText(/About 72 quota units a day/)).toBeTruthy()
   })
 
   it('disables playlists already used by another scheduler', async () => {
@@ -149,12 +148,10 @@ describe('scheduler editor', () => {
     // Only input fields are sent, not the whole view.
     expect(Object.keys(api.schedulers.update.mock.calls[0]![1]).sort()).toEqual([
       'channels',
-      'intervalDays',
+      'minuteOfHour',
       'name',
       'playlistId',
       'playlistTitle',
-      'timeOfDay',
-      'timezone',
     ])
   })
 

@@ -2,17 +2,17 @@
 import { randomUUID } from 'node:crypto'
 import type { Channel, SchedulerInput, SchedulerView } from '../shared/api'
 import { MAX_CHANNELS, MAX_NAME_LENGTH } from '../shared/constants'
-import { firstRunAt, validateSchedule } from './core/schedule'
+import { nextSlotAfter, validateMinute } from './core/schedule'
 import type { SchedulerRecord, SqliteStorage } from './db/sqlite-storage'
 
 /** Picks the input fields and checks them, throwing an Error with every problem found. */
 function validate(input: SchedulerInput): SchedulerInput {
-  const { playlistId, playlistTitle, intervalDays, timeOfDay, timezone } = input
+  const { playlistId, playlistTitle, minuteOfHour } = input
   const name = input.name.trim()
   const channels = [...new Map(input.channels.map((c) => [c.id, c])).values()].map((c): Channel =>
     c.thumbnailUrl?.startsWith('https://') ? c : { ...c, thumbnailUrl: undefined },
   )
-  const errors = validateSchedule({ intervalDays, timeOfDay, timezone })
+  const errors = validateMinute(minuteOfHour)
   if (!name) errors.unshift('Give the scheduler a name.')
   if (name.length > MAX_NAME_LENGTH)
     errors.push(`Name must be ${MAX_NAME_LENGTH} characters or fewer.`)
@@ -21,7 +21,7 @@ function validate(input: SchedulerInput): SchedulerInput {
     errors.push(`A scheduler can track at most ${MAX_CHANNELS} channels.`)
   }
   if (errors.length > 0) throw new Error(errors.join(' '))
-  return { name, playlistId, playlistTitle, intervalDays, timeOfDay, timezone, channels }
+  return { name, playlistId, playlistTitle, minuteOfHour, channels }
 }
 
 /** Scheduler operations used by IPC; `onChange` runs after every change. */
@@ -38,9 +38,7 @@ export function createSchedulerService(deps: {
       name: s.name,
       playlistId: s.playlistId,
       playlistTitle: s.playlistTitle,
-      intervalDays: s.intervalDays,
-      timeOfDay: s.timeOfDay,
-      timezone: s.timezone,
+      minuteOfHour: s.minuteOfHour,
       active: s.active,
       createdAt: s.createdAt.toISOString(),
       lastSuccessAt: s.lastSuccessAt?.toISOString(),
@@ -91,7 +89,7 @@ export function createSchedulerService(deps: {
   return {
     list: (): SchedulerView[] => storage.listSchedulers().map(toView),
 
-    /** New schedulers are active and first scan at the next occurrence of their time. */
+    /** New schedulers are active and first scan at the next occurrence of their minute. */
     create(input: SchedulerInput): SchedulerView {
       const { channels, ...fields } = validate(input)
       assertPlaylistFree(fields.playlistId)
@@ -102,23 +100,22 @@ export function createSchedulerService(deps: {
           ...fields,
           active: true,
           createdAt: now,
-          nextRunAt: firstRunAt(fields, now),
+          nextRunAt: nextSlotAfter(fields.minuteOfHour, now),
         },
         channels,
         true,
       )
     },
 
-    /** Changing the interval, time or time zone restarts the schedule from the next occurrence. */
+    /** Changing the minute moves the next scan to that minute's next occurrence. */
     update(id: string, input: SchedulerInput): SchedulerView {
       const { channels, ...fields } = validate(input)
       const existing = get(id)
       assertPlaylistFree(fields.playlistId, id)
-      const rescheduled =
-        fields.intervalDays !== existing.intervalDays ||
-        fields.timeOfDay !== existing.timeOfDay ||
-        fields.timezone !== existing.timezone
-      const nextRunAt = rescheduled ? firstRunAt(fields, deps.now()) : existing.nextRunAt
+      const nextRunAt =
+        fields.minuteOfHour !== existing.minuteOfHour
+          ? nextSlotAfter(fields.minuteOfHour, deps.now())
+          : existing.nextRunAt
       return save({ ...existing, ...fields, nextRunAt }, channels, false)
     },
 
@@ -126,7 +123,9 @@ export function createSchedulerService(deps: {
     setActive(id: string, active: boolean): SchedulerView {
       const existing = get(id)
       if (existing.active === active) return toView(existing)
-      const nextRunAt = active ? firstRunAt(existing, deps.now()) : existing.nextRunAt
+      const nextRunAt = active
+        ? nextSlotAfter(existing.minuteOfHour, deps.now())
+        : existing.nextRunAt
       return save({ ...existing, active, nextRunAt }, null, false)
     },
 

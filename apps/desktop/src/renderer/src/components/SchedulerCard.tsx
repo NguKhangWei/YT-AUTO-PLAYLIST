@@ -5,7 +5,7 @@ import { ChannelAvatar } from '@/components/ChannelAvatar'
 import { LastRunLine } from '@/components/RunSummary'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { formatInZone, intervalLabel } from '@/lib/format'
+import { formatTime, scheduleLabel } from '@/lib/format'
 
 export function SchedulerCard({
   scheduler: s,
@@ -40,11 +40,9 @@ export function SchedulerCard({
 
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Schedule</dt>
-        <dd>
-          {intervalLabel(s.intervalDays)} at {s.timeOfDay} ({s.timezone})
-        </dd>
+        <dd>{scheduleLabel(s.minuteOfHour)}</dd>
         <dt className="text-muted-foreground">Next scan</dt>
-        <dd>{s.active ? formatInZone(s.nextRunAt, s.timezone) : '—'}</dd>
+        <dd>{s.active ? formatTime(s.nextRunAt) : '—'}</dd>
         <dt className="text-muted-foreground">Last scan</dt>
         <dd className="min-w-0">
           {s.lastRun ? <LastRunLine run={s.lastRun} now={now} /> : 'Never'}

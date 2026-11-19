@@ -53,23 +53,22 @@ describe('scheduler loop', () => {
     expect(t.runner.run).not.toHaveBeenCalled()
   })
 
-  it('starts a due scan and moves the next run to the following slot', async () => {
+  it('starts a due scan and moves the next run to the following hour', async () => {
     const t = setup()
-    t.add('a', '2026-11-09T01:00:00Z', { intervalDays: 2 }) // due since yesterday 09:00
+    t.add('a', '2026-11-10T00:00:00Z') // due now (minute :00)
     expect(await t.loop.tick()).toEqual(['a'])
     expect(t.runner.run).toHaveBeenCalledWith('a', 'scheduled')
-    expect(await t.nextRun('a')).toBe('2026-11-11T01:00:00.000Z')
+    expect(await t.nextRun('a')).toBe('2026-11-10T01:00:00.000Z')
     expect(t.onChange).toHaveBeenCalled()
   })
 
-  it('catches up many missed slots with ONE scan, staying on the cadence', async () => {
+  it('catches up many missed hours with ONE scan, staying on its minute', async () => {
     const t = setup()
-    // Every 3 days from Oct 31 09:00 MYT; the PC was off until Nov 10 08:00 MYT.
-    t.add('a', '2026-10-31T01:00:00Z', { intervalDays: 3 })
+    // Scans at :30; the PC was off from Nov 9 01:30 until Nov 10 00:00.
+    t.add('a', '2026-11-09T01:30:00Z', { minuteOfHour: 30 })
     expect(await t.loop.tick()).toEqual(['a'])
     expect(t.runner.run).toHaveBeenCalledTimes(1)
-    // Slots: Oct 31, Nov 3, 6, 9 (missed) → next Nov 12 09:00 MYT.
-    expect(await t.nextRun('a')).toBe('2026-11-12T01:00:00.000Z')
+    expect(await t.nextRun('a')).toBe('2026-11-10T00:30:00.000Z')
     expect(await t.loop.tick()).toEqual([])
   })
 

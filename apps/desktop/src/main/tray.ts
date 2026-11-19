@@ -1,6 +1,6 @@
 // The tray menu and its hover text.
 import type { MenuItemConstructorOptions } from 'electron'
-import { formatInZone } from '../shared/format'
+import { formatTime } from '../shared/format'
 import type { SchedulerRecord } from './db/sqlite-storage'
 
 export interface TrayState {
@@ -45,6 +45,6 @@ export function trayTooltip(schedulers: SchedulerRecord[], paused: boolean): str
     .filter((s) => s.active)
     .sort((a, b) => a.nextRunAt.getTime() - b.nextRunAt.getTime())[0]
   if (!next) return 'auto-yt · no active schedulers'
-  const text = `auto-yt · next scan: ${next.name}, ${formatInZone(next.nextRunAt, next.timezone)}`
+  const text = `auto-yt · next scan: ${next.name}, ${formatTime(next.nextRunAt)}`
   return text.slice(0, 127) // Windows' tooltip limit
 }

@@ -36,7 +36,7 @@ export function createSchedulerLoop(deps: SchedulerLoopDeps) {
     const due = deps.storage
       .listSchedulers()
       .filter((s) => s.active)
-      .map((s) => ({ id: s.id, next: nextRunIfDue(s, s.nextRunAt, now) }))
+      .map((s) => ({ id: s.id, next: nextRunIfDue(s.minuteOfHour, s.nextRunAt, now) }))
       .filter((d): d is { id: string; next: Date } => d.next !== null)
     if (due.length === 0) return []
 

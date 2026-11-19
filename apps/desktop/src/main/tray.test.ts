@@ -39,7 +39,7 @@ describe('trayMenu', () => {
 })
 
 describe('trayTooltip', () => {
-  it('names the next active scan in its own time zone', () => {
+  it('names the next active scan in local time (tests run in Malaysia Time)', () => {
     const tip = trayTooltip(
       [
         scheduler('a', { name: 'Later', nextRunAt: new Date('2026-11-12T01:00:00Z') }),

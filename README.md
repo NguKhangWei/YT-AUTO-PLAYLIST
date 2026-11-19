@@ -2,7 +2,7 @@
 
 A Windows desktop app that automatically adds new uploads from YouTube channels you pick to a playlist you choose, on a schedule.
 
-- **Schedulers:** each one scans a set of channels every N days (1–30) at a time you choose, in any time zone (Malaysia Time by default). It adds their new videos to **its own playlist**, so you could have a "Gaming" scheduler and a "Learning" one.
+- **Schedulers:** each one scans a set of channels **every hour**, at a minute past the hour you choose (e.g. :15). It adds their new videos to **its own playlist**, so you could have a "Gaming" scheduler and a "Learning" one.
 - **Regular videos only:** Shorts, livestreams, premieres and upcoming streams are skipped.
 - **No duplicates:** a video is added once. Videos already in the playlist, including ones you added yourself, are left alone, and videos you remove aren't added back.
 - **Runs in the background:** it lives in the system tray and starts when you log in. Scans missed while the PC was off or asleep run **once** when it's back.
@@ -11,8 +11,8 @@ A Windows desktop app that automatically adds new uploads from YouTube channels 
 ## How it works
 
 1. You sign in with Google in your normal browser (the app never sees your password).
-2. You create schedulers: name, target playlist, interval, time, time zone, and the channels to track (search by name, or paste a channel URL or `@handle`).
-3. At each scheduled time the app:
+2. You create schedulers: name, target playlist, the minute of the hour to scan at, and the channels to track (search by name, or paste a channel URL or `@handle`).
+3. Every hour, at that minute, the app:
    - lists each channel's uploads since its last scan
    - keeps regular videos only
    - skips anything already in the playlist
@@ -75,7 +75,7 @@ Run `auto-yt-setup-<version>.exe`. It installs for your Windows user only, so no
 ### 6. First run
 
 1. Click **Sign in with Google**. Approve in the browser, close the tab, and you're back in the app.
-2. Click **New scheduler**, pick a playlist (create it on YouTube first), set the schedule, add channels, then **Create**.
+2. Click **New scheduler**, pick a playlist (create it on YouTube first), choose the minute of the hour to scan at, add channels, then **Create**.
 3. Use **Run now** to try it straight away. Scheduled scans happen on their own from then on.
 
 ## Everyday use
@@ -88,14 +88,16 @@ Run `auto-yt-setup-<version>.exe`. It installs for your Windows user only, so no
 
 Google gives each Cloud project **10,000 units per day**. The count resets at **midnight Pacific Time** (16:00 Malaysia Time in winter, 15:00 in summer).
 
-| Action                          | Cost                                |
-| ------------------------------- | ----------------------------------- |
-| Search channels by name         | 101 (same search within 24 h: free) |
-| Paste a channel URL / `@handle` | 1                                   |
-| Scan a channel for new uploads  | about 1–3                           |
-| **Add a video to a playlist**   | **50**                              |
+| Action                          | Cost                                               |
+| ------------------------------- | -------------------------------------------------- |
+| Search channels by name         | 101 (same search within 24 h: free)                |
+| Paste a channel URL / `@handle` | 1                                                  |
+| Scan a channel for new uploads  | about 1 (a little more when there's something new) |
+| **Add a video to a playlist**   | **50**                                             |
 
-Adding videos is the expensive part: about **190 videos per day** across all schedulers. If the quota runs out mid-scan, the scan stops and you're notified. The remaining videos are added on the next scan.
+Scans are hourly, so each tracked channel costs about **24 units a day** even when nothing is new (the editor shows the estimate per scheduler). 20 channels use about 480 units a day; around 300 channels across all schedulers would leave almost nothing for adding videos.
+
+Adding videos is the expensive part: at most about **190 videos per day** across all schedulers, less the scanning cost. If the quota runs out mid-scan, the scan stops and you're notified. The remaining videos are added on the next scan.
 
 ## Troubleshooting
 
@@ -105,7 +107,7 @@ Adding videos is the expensive part: about **190 videos per day** across all sch
 | "Access blocked" when signing in             | Your account isn't a **Test user** on the consent screen (step 3), or the app isn't published.                                         |
 | "This Google account has no YouTube channel" | Create a channel at youtube.com (or sign in with another account).                                                                     |
 | Asked to sign in again every week            | The consent screen is still in **Testing**. Publish it (step 3.4).                                                                     |
-| "YouTube daily quota used up"                | Wait for the reset (midnight Pacific Time). Fewer channels or longer intervals use less.                                               |
+| "YouTube daily quota used up"                | Wait for the reset (midnight Pacific Time). Tracking fewer channels uses less.                                                         |
 | A scheduler turned itself **Off**            | Its playlist was deleted on YouTube. Edit it, pick another playlist, and turn it back on.                                              |
 | No notifications                             | Check Windows **Focus assist / Do not disturb** and Settings → System → Notifications → auto-yt.                                       |
 | Scans didn't run at the scheduled time       | auto-yt only runs while you're logged in and the PC is awake. Missed scans run once when it's back. Check it's not paused (tray menu). |
