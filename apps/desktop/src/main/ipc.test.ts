@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { IPC } from '../shared/ipc'
 import { YouTubeApiError } from './core/youtube/errors'
-import { listMyPlaylists, wrap } from './ipc'
+import { createHandlers, listMyPlaylists, registerIpc, wrap } from './ipc'
 
 describe('wrap', () => {
   it('returns data in an ok envelope', async () => {
@@ -37,5 +38,43 @@ describe('listMyPlaylists', () => {
         },
       }),
     ).rejects.toBe(quota)
+  })
+})
+
+describe('createHandlers / registerIpc', () => {
+  const deps = () =>
+    ({
+      auth: { status: vi.fn(), signIn: vi.fn(), cancelSignIn: vi.fn(), signOut: vi.fn() },
+      youtube: { listMyPlaylists: vi.fn(async () => []) },
+      schedulers: { list: vi.fn(() => []), remove: vi.fn() },
+      channels: { search: vi.fn() },
+      runner: { run: vi.fn() },
+      storage: { listRuns: vi.fn(() => []) },
+      loop: { isPaused: vi.fn(() => true), setPaused: vi.fn() },
+    }) as never
+
+  it('handles every call channel (pushes are not calls)', () => {
+    const pushes: string[] = [IPC.authStatusChanged, IPC.runsChanged, IPC.scansPausedChanged]
+    const calls = Object.values(IPC).filter((c) => !pushes.includes(c))
+    expect(Object.keys(createHandlers(deps())).sort()).toEqual([...calls].sort())
+  })
+
+  it('routes arguments to the services', async () => {
+    const d = deps() as unknown as {
+      schedulers: { remove: ReturnType<typeof vi.fn> }
+      loop: { setPaused: ReturnType<typeof vi.fn> }
+    }
+    const h = createHandlers(d as never)
+    await h[IPC.schedulersRemove]!('s1')
+    expect(d.schedulers.remove).toHaveBeenCalledWith('s1')
+    expect(await h[IPC.scansSetPaused]!(true)).toBe(true)
+    expect(d.loop.setPaused).toHaveBeenCalledWith(true)
+  })
+
+  it('registers each handler with Electron, wrapped in an envelope', async () => {
+    const handle = vi.fn()
+    registerIpc({ handle }, { 'x:y': (a: number) => a * 2 })
+    expect(handle).toHaveBeenCalledWith('x:y', expect.any(Function))
+    expect(await handle.mock.calls[0]![1]({}, 21)).toEqual({ ok: true, data: 42 })
   })
 })

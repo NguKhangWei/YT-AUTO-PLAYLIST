@@ -1,8 +1,13 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createEncryptedFileStore, type Cipher } from './token-store'
+import {
+  createEncryptedFileStore,
+  createPlainFileStore,
+  parseStoredAuth,
+  type Cipher,
+} from './token-store'
 
 /** Reversible fake "encryption" so tests can tell plaintext was not written. */
 const fakeCipher = (available = true, rotated = false) => {
@@ -68,5 +73,43 @@ describe('createEncryptedFileStore', () => {
   it('refuses to save when OS encryption is unavailable', async () => {
     const store = createEncryptedFileStore(file, fakeCipher(false))
     await expect(store.save(auth)).rejects.toThrow(/encryption is unavailable/)
+  })
+})
+
+describe('createPlainFileStore (server)', () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'auto-yt-plain-'))
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('round-trips a sign-in through a JSON file, creating the folder', async () => {
+    const file = join(dir, 'nested', 'auth.json')
+    const store = createPlainFileStore(file)
+    expect(await store.load()).toBeNull()
+    await store.save(auth)
+    expect(await store.load()).toEqual(auth)
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(auth)
+    await store.clear()
+    expect(await store.load()).toBeNull()
+  })
+
+  it.runIf(process.platform !== 'win32')('writes the file readable by its owner only', async () => {
+    const file = join(dir, 'auth.json')
+    await writeFile(file, '{}', { mode: 0o644 })
+    await createPlainFileStore(file).save(auth)
+    expect((await stat(file)).mode & 0o777).toBe(0o600)
+  })
+
+  it('treats a corrupt or incomplete file as signed out', async () => {
+    const file = join(dir, 'auth.json')
+    for (const text of ['not json', '{}', '{"refreshToken":""}', '{"refreshToken":"x"}']) {
+      await writeFile(file, text)
+      expect(await createPlainFileStore(file).load()).toBeNull()
+    }
+  })
+
+  it('keeps only the known fields', () => {
+    expect(parseStoredAuth(JSON.stringify({ ...auth, extra: 1 }))).toEqual(auth)
   })
 })

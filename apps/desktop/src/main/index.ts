@@ -22,7 +22,7 @@ import { createChannelService } from './channels'
 import { createYouTubeClient, isShortVideo } from './core/youtube/client'
 import { openDatabase } from './db/database'
 import { createSqliteStorage } from './db/sqlite-storage'
-import { registerIpc } from './ipc'
+import { createHandlers, registerIpc } from './ipc'
 import type { NotificationText } from './notifications'
 import { createRunner } from './runner'
 import { createSchedulerLoop } from './scheduler-loop'
@@ -147,7 +147,10 @@ function main(): void {
     },
   })
   const channels = createChannelService({ youtube, now })
-  registerIpc({ ipcMain, auth, youtube, schedulers, channels, runner, storage, loop })
+  registerIpc(
+    ipcMain,
+    createHandlers({ auth, youtube, schedulers, channels, runner, storage, loop }),
+  )
 
   const canOpenAtLogin = app.isPackaged // in dev it would register electron.exe
   const tray = new Tray(nativeImage.createFromPath(trayIconPath))

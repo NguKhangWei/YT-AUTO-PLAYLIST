@@ -8,6 +8,12 @@ export interface FilterResult {
   skipped: { video: VideoDetails; reason: SkipReason }[]
 }
 
+/**
+ * The Shorts check to use when YouTube's `/shorts/` probe can't be trusted (SHORTS_PROBE=off):
+ * every video of 3 minutes or less counts as a Short, so some short regular videos are skipped too.
+ */
+export const assumeShort = async (_videoId: string): Promise<boolean> => true
+
 /** Seconds in an ISO 8601 duration as YouTube returns it ("PT1H2M3S", "P0D"); 0 if unreadable. */
 export function parseIsoDuration(iso: string): number {
   const m = /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(iso)

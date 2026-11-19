@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { filterRegularVideos, parseIsoDuration } from './filter'
+import { assumeShort, filterRegularVideos, parseIsoDuration } from './filter'
 import type { VideoDetails } from './youtube/types'
 
 const video = (over: Partial<VideoDetails> = {}): VideoDetails => ({
@@ -33,6 +33,15 @@ describe('parseIsoDuration', () => {
 })
 
 describe('filterRegularVideos', () => {
+  it('with the probe off (assumeShort), skips every video of 3 minutes or less', async () => {
+    const { regular, skipped } = await filterRegularVideos(
+      [video({ id: 'short', durationSeconds: 180 }), video({ id: 'long', durationSeconds: 181 })],
+      assumeShort,
+    )
+    expect(regular.map((v) => v.id)).toEqual(['long'])
+    expect(skipped.map((s) => [s.video.id, s.reason])).toEqual([['short', 'short']])
+  })
+
   it('only asks the Shorts probe about videos of 3 minutes or less', async () => {
     const isShort = vi.fn(async () => false)
     await filterRegularVideos(
