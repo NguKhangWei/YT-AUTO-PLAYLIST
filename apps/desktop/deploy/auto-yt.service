@@ -1,0 +1,27 @@
+# systemd unit for the auto-yt server. Install on the VM:
+#   sudo install -m 644 auto-yt.service /etc/systemd/system/auto-yt.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now auto-yt
+[Unit]
+Description=auto-yt (hourly YouTube playlist scans + private web UI)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autoyt
+Group=autoyt
+EnvironmentFile=/etc/auto-yt/auto-yt.env
+ExecStart=/usr/local/bin/node --disable-warning=ExperimentalWarning /opt/auto-yt/app/server.mjs
+Restart=on-failure
+RestartSec=10
+# New files (database, backups, sign-in) readable by the service user only.
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/auto-yt
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

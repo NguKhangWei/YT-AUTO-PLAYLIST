@@ -22,7 +22,8 @@
     "debug:lookback": "node apps/desktop/scripts/debug-lookback.mjs",
     "build:server": "npm run build:server -w @auto-yt/desktop",
     "serve:local": "npm run build:server && npm run serve:local -w @auto-yt/desktop",
-    "cloud:signin": "npm run build:server && node --env-file-if-exists=.env --disable-warning=ExperimentalWarning apps/desktop/out-server/server.mjs signin"
+    "cloud:signin": "npm run build:server && node --env-file-if-exists=.env --disable-warning=ExperimentalWarning apps/desktop/out-server/server.mjs signin",
+    "deploy:cloud": "npm run build:server && node apps/desktop/scripts/deploy-cloud.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

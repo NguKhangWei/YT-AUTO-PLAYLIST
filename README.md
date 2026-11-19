@@ -121,16 +121,25 @@ Everything is stored on your PC in `%APPDATA%\auto-yt`:
 
 The app only talks to Google and YouTube. **Sign out** revokes its access at Google, and you can also remove access at [myaccount.google.com/permissions](https://myaccount.google.com/permissions). Uninstalling keeps `%APPDATA%\auto-yt`; delete that folder to remove everything. See [PRIVACY.md](PRIVACY.md).
 
+## Running it in the cloud
+
+To keep scans running while your PC is off, auto-yt can also run on a free Google Cloud VM (IPv6-only, so no IP address charges). You manage it from a private web page that only your own devices can open, through Tailscale, and get notifications on your phone through ntfy. The full runbook is [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Development
 
-| Command             | What it does                                            |
-| ------------------- | ------------------------------------------------------- |
-| `npm run dev`       | Run the app with hot reload (uses the same data folder) |
-| `npm run check`     | Typecheck, lint, format check and tests                 |
-| `npm test`          | Tests only (`npm run test:watch` to watch)              |
-| `npm run build:win` | Build the Windows installer                             |
+| Command                                | What it does                                                           |
+| -------------------------------------- | ---------------------------------------------------------------------- |
+| `npm run dev`                          | Run the app with hot reload (uses the same data folder)                |
+| `npm run check`                        | Typecheck, lint, format check and tests                                |
+| `npm test`                             | Tests only (`npm run test:watch` to watch)                             |
+| `npm run build:win`                    | Build the Windows installer                                            |
+| `npm run build:server`                 | Build the cloud server: `apps/desktop/out-server/` (server.mjs + web/) |
+| `npm run serve:local`                  | Build and run the server on this PC (own data folder), port 8080       |
+| `npm run cloud:signin -- --out FILE`   | Sign in on this PC and write the server's token file                   |
+| `npm run deploy:cloud -- User@auto-yt` | Build, copy to the VM over Tailscale SSH and restart it                |
 
 - `apps/desktop/src/main` is the Electron main process: sign-in, SQLite storage, the scheduler loop and the tray. `main/core` holds the scan engine (schedule maths, YouTube API client, video filter, scan).
-- `apps/desktop/src/renderer` is the React window. `apps/desktop/src/shared` holds the types and constants both sides use.
+- `apps/desktop/src/renderer` is the React window, also built as the server's web UI. `apps/desktop/src/shared` holds the types and constants both sides use.
+- `apps/desktop/src/server` is the headless cloud server: the same services as the main process, with the window's calls served over HTTP and pushes over SSE.
 
 To test scans without waiting for new uploads, run `npm run debug:lookback -- "<scheduler name>" [days]` (default 7). It makes that scheduler treat recent uploads as new, so **Run now** has something to add.

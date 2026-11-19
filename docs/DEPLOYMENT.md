@@ -7,7 +7,7 @@ auto-yt can be deployed in two ways:
 
 The recommended setup uses both: the cloud runs the scans, and the desktop app stays installed with scans **paused** as a fallback.
 
-> **Status:** Part 1 works today. Part 2 needs milestone H1 (hourly scans) and the cloud milestones C1–C4 in `PLAN.md` to be built first. Any step that uses a command that doesn't exist yet is marked **(C*n*)**.
+> **Status:** everything in this runbook is built. Reachability (2.8) passed on the real VM on 2026-11-19; the server itself (2.9 onwards) is tested locally and waits for its first deploy.
 >
 > **Scans run every hour**, at the minute each scheduler sets (H1). Missed hours (VM down, laptop asleep) are caught up with **one** scan.
 
@@ -25,7 +25,7 @@ The recommended setup uses both: the cloud runs the scans, and the desktop app s
   - [2.8 Check reachability (C0)](#28-check-reachability-c0)
   - [2.9 Configure, deploy and start](#29-configure-deploy-and-start)
   - [2.10 Move your data from the desktop](#210-move-your-data-from-the-desktop)
-  - [2.11 Sign in](#211-sign-in-c3)
+  - [2.11 Sign in](#211-sign-in)
   - [2.12 Verify](#212-verify)
 - [Part 3: Operating it](#part-3-operating-it)
 - [Cost](#cost)
@@ -64,7 +64,7 @@ Laptop / phone ──(Tailscale, private)──▶ https://auto-yt.<tailnet>.ts.
                                               │  tailscale serve
                                               ▼
                        e2-micro VM (IPv6-only, Debian, systemd)
-                        node /opt/auto-yt/server.mjs  (127.0.0.1:8080)
+                        node /opt/auto-yt/app/server.mjs  (127.0.0.1:8080)
                         /var/lib/auto-yt/{auto-yt.db, auth.json, backups/}
                                               │  IPv6
                                               ▼
@@ -97,11 +97,19 @@ gcloud config set project $PROJECT
 ```powershell
 gcloud services enable compute.googleapis.com billingbudgets.googleapis.com
 gcloud billing projects describe $PROJECT --format="value(billingAccountName)"   # prints billingAccounts/XXXX
+gcloud billing accounts describe <XXXX> --format="value(currencyCode)"             # e.g. MYR
 gcloud billing budgets create --billing-account=<XXXX> --display-name="auto-yt guard" `
-  --budget-amount=1USD --threshold-rule=percent=0.5 --threshold-rule=percent=1.0
+  --budget-amount=5MYR --filter-projects="projects/$PROJECT" `
+  --threshold-rule=percent=0.5 --threshold-rule=percent=1.0
 ```
 
-You'll get an email if the project ever costs more than $0.50. It should cost $0. If the email arrives, check [Cost](#cost).
+Use the billing account's own currency in `--budget-amount` (`1USD` fails on a ringgit account with `INVALID_ARGUMENT`). You'll get an email if the project ever costs more than half of that. It should cost nothing. If the email arrives, check [Cost](#cost). The console works too: **Billing → Budgets & alerts → Create budget**.
+
+> **Billing notes:**
+>
+> - A new billing account puts a **temporary authorization hold** on your card (RM120 in Malaysia), released within about a week. It isn't a charge.
+> - `gcloud billing …` can fail with **429 "Quota exceeded … consumer project_number:32555940559"**. That's gcloud's own shared project, not yours: wait a minute, or run `gcloud config set billing/quota_project $PROJECT`.
+> - A billing account that's **closed** (`OPEN: False` in `gcloud billing accounts list`) can't be used. If it can't be reopened ("not in good standing"), create a new one.
 
 ### 2.3 Publish the OAuth consent screen
 
@@ -116,7 +124,7 @@ You'll get an email if the project ever costs more than $0.50. It should cost $0
 2. Under **Audience → Publish app**, confirm the change to **In production**. Don't submit the app for verification; personal use doesn't need it.
 3. After publishing, **sign in to the desktop app again** once. Sign-ins made while the app was in Testing still expire after 7 days.
 
-The cloud uses the **same Desktop OAuth client** as the desktop app. You don't need a new client.
+The cloud uses the **same Desktop OAuth client** as the desktop app. If you put the VM in a **new** project and created a new client there, put the new ID and secret in the repo `.env`, rebuild the desktop app (`npm run build:win`), install it and sign in again: the old sign-in belongs to the old client.
 
 > **Important:** **Sign out** in either the desktop app or the web UI revokes Google access for **both**, because they share one client. To stop one copy, pause or stop it; don't sign out.
 
@@ -205,15 +213,19 @@ sudo useradd --system --home-dir /var/lib/auto-yt --create-home --shell /usr/sbi
 sudo chmod 700 /var/lib/auto-yt
 sudo mkdir -p /opt/auto-yt /etc/auto-yt
 sudo chown "$USER" /opt/auto-yt
+ls -ld /opt/auto-yt    # the owner must be your VM user, not root
 ```
 
-Exit the VM, then check from the laptop that SSH over Tailscale works:
+Run these as your normal VM user, not in a root shell (`sudo -i`): the deploy copies the app into `/opt/auto-yt` as that user. If the owner shows `root`, run `sudo chown <your-vm-username> /opt/auto-yt`.
+
+Exit the VM. **Install Tailscale on the laptop too** (`winget install Tailscale.Tailscale`) and sign in with the same account. Then check that SSH over Tailscale works:
 
 ```powershell
-ssh <your-vm-username>@auto-yt "hostname"   # prints auto-yt
+tailscale status                              # lists your laptop and auto-yt
+ssh <your-vm-username>@auto-yt "hostname"     # prints auto-yt
 ```
 
-Your VM username is the one `gcloud compute ssh` used, shown in its prompt. Every later `ssh`/`scp` to `auto-yt` goes over Tailscale.
+Your VM username is the folder name in `/home` on the VM (`ls /home`), e.g. `User`; it's case-sensitive. Every later `ssh`/`scp` to `auto-yt` goes over Tailscale. "Could not resolve hostname auto-yt" means Tailscale isn't running or signed in on the laptop.
 
 ### 2.7 Remove the IPv4 address (go IPv6-only)
 
@@ -258,81 +270,63 @@ The last lines give the `SHORTS_PROBE` value to use and whether anything blocks 
 
 ### 2.9 Configure, deploy and start
 
-**Environment file (on the VM).** Use the client ID and secret from your repo `.env`, without the `MAIN_VITE_` prefix:
+**1. Install the service (once, from the laptop, in the repo folder).** The unit is [apps/desktop/deploy/auto-yt.service](../apps/desktop/deploy/auto-yt.service): it runs `node /opt/auto-yt/app/server.mjs` as `autoyt`, restarts on failure, and can only write to `/var/lib/auto-yt`.
+
+```powershell
+scp apps/desktop/deploy/auto-yt.service <your-vm-username>@auto-yt:/tmp/
+ssh <your-vm-username>@auto-yt "sudo install -m 644 /tmp/auto-yt.service /etc/systemd/system/ && rm /tmp/auto-yt.service && sudo systemctl daemon-reload && sudo systemctl enable auto-yt"
+```
+
+**2. Write the settings (once, on the VM).** Open a session with `ssh <your-vm-username>@auto-yt` (or the browser SSH button) and paste this, filling in your values. The template with explanations is [apps/desktop/deploy/auto-yt.env.example](../apps/desktop/deploy/auto-yt.env.example).
 
 ```sh
 sudo tee /etc/auto-yt/auto-yt.env >/dev/null <<'EOF'
-GOOGLE_CLIENT_ID=<client id>
+GOOGLE_CLIENT_ID=<client id from the repo .env, without MAIN_VITE_>
 GOOGLE_CLIENT_SECRET=<client secret>
 AUTO_YT_DATA_DIR=/var/lib/auto-yt
 AUTO_YT_PORT=8080
-AUTO_YT_ALLOWED_LOGIN=<your Tailscale login, e.g. you@gmail.com>
-NTFY_TOPIC=<your ntfy topic>
+AUTO_YT_ALLOWED_LOGIN=<your Tailscale login: admin console -> the machine -> Creator>
+NTFY_TOPIC=<your random ntfy topic, 16+ characters>
 SHORTS_PROBE=on
 EOF
 sudo chown root:autoyt /etc/auto-yt/auto-yt.env && sudo chmod 640 /etc/auto-yt/auto-yt.env
 ```
 
-**systemd service (on the VM)** (C4: also in `deploy/auto-yt.service`):
+The server refuses to start, and says why in its log, if a value is missing or the ntfy topic is short enough to guess (the probe's `auto-yt` would be refused).
 
-```sh
-sudo tee /etc/systemd/system/auto-yt.service >/dev/null <<'EOF'
-[Unit]
-Description=auto-yt scheduler and web UI
-After=network-online.target tailscaled.service
-Wants=network-online.target
-
-[Service]
-User=autoyt
-Group=autoyt
-EnvironmentFile=/etc/auto-yt/auto-yt.env
-ExecStart=/usr/local/bin/node /opt/auto-yt/server.mjs
-Restart=on-failure
-RestartSec=10
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-ReadWritePaths=/var/lib/auto-yt
-MemoryMax=400M
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload && sudo systemctl enable auto-yt
-```
-
-**Build and copy the app (on the laptop).** Use the repo root and the same commit as your desktop build.
+**3. Build and deploy (on the laptop).** Use the same commit as your desktop build.
 
 ```powershell
 npm ci
 npm run check
-npm run deploy:cloud -- <your-vm-username>@auto-yt     # (C4)
+npm run deploy:cloud -- <your-vm-username>@auto-yt
 ```
 
-`deploy:cloud` does the following:
+`deploy:cloud`:
 
-1. Runs `npm run build:server` (C2), which produces `apps/desktop/out-server/` (`server.mjs` plus `web/`).
-2. Copies it to `/opt/auto-yt.new` on the VM.
-3. Moves the current version to `/opt/auto-yt.prev` and the new one into `/opt/auto-yt`.
-4. Restarts the service.
+1. Runs `npm run build:server`, which writes `apps/desktop/out-server/`: `server.mjs` (one file, only Node built-ins) and `web/` (the UI).
+2. Copies it to `/opt/auto-yt/app.new` on the VM over Tailscale SSH.
+3. Keeps the running version as `/opt/auto-yt/app.prev`, moves the new one to `/opt/auto-yt/app`, restarts the service, and prints its status and last log lines.
 
-To do the same by hand:
+The first start creates an empty database and waits for sign-in. That's expected: 2.10 and 2.11 bring in your data and sign-in.
+
+To do it by hand:
 
 ```powershell
 npm run build:server
-scp -r apps/desktop/out-server <your-vm-username>@auto-yt:/opt/auto-yt.new
-ssh <your-vm-username>@auto-yt "rm -rf /opt/auto-yt.prev; mv /opt/auto-yt /opt/auto-yt.prev; mv /opt/auto-yt.new /opt/auto-yt; sudo systemctl restart auto-yt"
+ssh <your-vm-username>@auto-yt "rm -rf /opt/auto-yt/app.new"
+scp -r apps/desktop/out-server <your-vm-username>@auto-yt:/opt/auto-yt/app.new
+ssh <your-vm-username>@auto-yt "cd /opt/auto-yt && rm -rf app.prev && { [ ! -d app ] || mv app app.prev; } && mv app.new app && sudo systemctl restart auto-yt"
 ```
 
-**Publish the web UI to your tailnet only (on the VM, once):**
+**4. Publish the web UI to your tailnet only (on the VM, once):**
 
 ```sh
 sudo tailscale serve --bg 8080
 tailscale serve status    # shows https://auto-yt.<tailnet>.ts.net
 ```
 
-Use `serve`, never `funnel`: funnel would put the web UI on the public internet.
+Use `serve`, never `funnel`: funnel would put the web UI on the public internet. `serve` also tells the server who you are (the `Tailscale-User-Login` header), which it checks against `AUTO_YT_ALLOWED_LOGIN`.
 
 ### 2.10 Move your data from the desktop
 
@@ -348,15 +342,15 @@ The database holds your schedulers, history and the record of videos already add
 
 3. You can start the desktop app again. It stays **paused**, so it never scans on a schedule. **Don't use Run now on the desktop** while the cloud is active: the two databases are now separate, and the desktop could re-add videos the cloud added that you later removed by hand.
 
-### 2.11 Sign in (C3)
+### 2.11 Sign in
 
-On the laptop:
+The server has no browser, so you sign in on the laptop. In the repo folder:
 
 ```powershell
 npm run cloud:signin -- --out "$env:TEMP\auto-yt-auth.json"
 ```
 
-Approve in the browser. On the "Google hasn't verified this app" screen, choose **Advanced → Go to auto-yt**. Then install the token file on the VM and delete the local copy:
+It uses the Google client from the repo `.env` (the same one as the server's settings) and opens your browser. Approve in the browser. On the "Google hasn't verified this app" screen, choose **Advanced → Go to auto-yt**. Then install the token file on the VM and delete the local copy:
 
 ```powershell
 scp "$env:TEMP\auto-yt-auth.json" <your-vm-username>@auto-yt:/tmp/auth.json
@@ -381,20 +375,21 @@ The file holds a Google refresh token. Never commit or share it.
 
 ## Part 3: Operating it
 
-| Task                 | How                                                                                                                                                                                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| See logs             | `ssh <user>@auto-yt "journalctl -u auto-yt -n 200 --no-pager"` (`-f` to follow)                                                                                                                                                                 |
-| Deploy a new version | Laptop: `git pull`, `npm ci`, `npm run check`, `npm run deploy:cloud -- <user>@auto-yt`                                                                                                                                                         |
-| Roll back the app    | `ssh <user>@auto-yt "rm -rf /opt/auto-yt.bad; mv /opt/auto-yt /opt/auto-yt.bad; mv /opt/auto-yt.prev /opt/auto-yt; sudo systemctl restart auto-yt"`                                                                                             |
-| Restore the database | Stop the service. Copy a file from `/var/lib/auto-yt/backups/` over `auto-yt.db` (`sudo install -o autoyt -g autoyt -m 600 …`), delete the `-wal`/`-shm` files, start the service.                                                              |
-| Keep an off-VM copy  | `scp <user>@auto-yt:/var/lib/auto-yt/backups/<latest>.db .` now and then. The backups folder is readable only by `autoyt`; copy the file somewhere you can read it first, or run the scp with sudo on the VM side.                              |
-| "Sign in again" push | Repeat 2.11. This happens if you revoked access, signed out, or the consent screen went back to Testing.                                                                                                                                        |
-| "Quota used up" push | Nothing to do: the remaining videos are added on the next scan. The quota resets at midnight Pacific Time. It's shared with the desktop app (same project).                                                                                     |
-| Update Node.js       | Repeat the Node step in 2.6 (it needs IPv6 only), then `sudo systemctl restart auto-yt`.                                                                                                                                                        |
-| OS updates           | Security updates install automatically. Now and then: `sudo apt-get update && sudo apt-get -y full-upgrade && sudo reboot`.                                                                                                                     |
-| Fall back to desktop | Stop the cloud: `ssh <user>@auto-yt "sudo systemctl disable --now auto-yt"`. To keep the latest cursors, copy `/var/lib/auto-yt/auto-yt.db` back to `%APPDATA%\auto-yt\` with the desktop app quit. Start the desktop app and untick **Pause**. |
-| Back to the cloud    | The reverse: pause and quit the desktop, copy the database up (2.10), then `sudo systemctl enable --now auto-yt` and click **Resume** in the web UI.                                                                                            |
-| Tear it all down     | `gcloud compute instances delete auto-yt --zone=$ZONE`, then delete `auto-yt-subnet` and `auto-yt-net`. Remove the machine from Tailscale.                                                                                                      |
+| Task                   | How                                                                                                                                                                                                                                             |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| See logs               | `ssh <user>@auto-yt "journalctl -u auto-yt -n 200 --no-pager"` (`-f` to follow)                                                                                                                                                                 |
+| Deploy a new version   | Laptop: `git pull`, `npm ci`, `npm run check`, `npm run deploy:cloud -- <user>@auto-yt`                                                                                                                                                         |
+| Roll back the app      | `node apps/desktop/scripts/deploy-cloud.mjs <user>@auto-yt --rollback` (switches back to `/opt/auto-yt/app.prev` and restarts; the version you left stays in `app.bad`)                                                                         |
+| Try the server locally | `npm run serve:local`, then open `http://127.0.0.1:8080`. It uses its own data folder (`apps/desktop/.local-server`), never your desktop data, and lets anyone on this PC in. Stop it with Ctrl+C.                                              |
+| Restore the database   | Stop the service. Copy a file from `/var/lib/auto-yt/backups/` over `auto-yt.db` (`sudo install -o autoyt -g autoyt -m 600 …`), delete the `-wal`/`-shm` files, start the service.                                                              |
+| Keep an off-VM copy    | `scp <user>@auto-yt:/var/lib/auto-yt/backups/<latest>.db .` now and then. The backups folder is readable only by `autoyt`; copy the file somewhere you can read it first, or run the scp with sudo on the VM side.                              |
+| "Sign in again" push   | Repeat 2.11. This happens if you revoked access, signed out, or the consent screen went back to Testing.                                                                                                                                        |
+| "Quota used up" push   | Nothing to do: the remaining videos are added on the next scan. The quota resets at midnight Pacific Time. It's shared with the desktop app (same project).                                                                                     |
+| Update Node.js         | Repeat the Node step in 2.6 (it needs IPv6 only), then `sudo systemctl restart auto-yt`.                                                                                                                                                        |
+| OS updates             | Security updates install automatically. Now and then: `sudo apt-get update && sudo apt-get -y full-upgrade && sudo reboot`.                                                                                                                     |
+| Fall back to desktop   | Stop the cloud: `ssh <user>@auto-yt "sudo systemctl disable --now auto-yt"`. To keep the latest cursors, copy `/var/lib/auto-yt/auto-yt.db` back to `%APPDATA%\auto-yt\` with the desktop app quit. Start the desktop app and untick **Pause**. |
+| Back to the cloud      | The reverse: pause and quit the desktop, copy the database up (2.10), then `sudo systemctl enable --now auto-yt` and click **Resume** in the web UI.                                                                                            |
+| Tear it all down       | `gcloud compute instances delete auto-yt --zone=$ZONE`, then delete `auto-yt-subnet` and `auto-yt-net`. Remove the machine from Tailscale.                                                                                                      |
 
 **Rule of thumb:** only one copy, cloud or desktop, should ever be unpaused.
 
