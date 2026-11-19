@@ -43,7 +43,7 @@ const restart =
 if (rollback) {
   remote(
     'set -e; cd /opt/auto-yt; test -d app.prev || { echo "No previous version to go back to."; exit 1; }; ' +
-      'rm -rf app.bad; mv app app.bad; mv app.prev app; ' +
+      'chmod -R u=rwX,go=rX app.prev; rm -rf app.bad; mv app app.bad; mv app.prev app; ' +
       restart,
     'Switching back to the previous version and restarting',
   )
@@ -58,7 +58,10 @@ if (!existsSync(join(built, 'server.mjs')) || !existsSync(join(built, 'web', 'in
 remote('rm -rf /opt/auto-yt/app.new', 'Preparing /opt/auto-yt/app.new on the VM')
 run('scp', ['-r', '-q', built, `${target}:/opt/auto-yt/app.new`], 'Copying the build to the VM')
 remote(
-  'set -e; cd /opt/auto-yt; rm -rf app.prev; if [ -d app ]; then mv app app.prev; fi; mv app.new app; ' +
+  // scp from Windows creates folders with mode 700; the service user must be able to read
+  // the app (it holds no secrets: the client and topic come from /etc/auto-yt/auto-yt.env).
+  'set -e; cd /opt/auto-yt; chmod -R u=rwX,go=rX app.new; ' +
+    'rm -rf app.prev; if [ -d app ]; then mv app app.prev; fi; mv app.new app; ' +
     restart,
   'Switching to the new version and restarting',
 )
