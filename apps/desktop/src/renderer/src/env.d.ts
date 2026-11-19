@@ -2,7 +2,7 @@ import type { Api } from '../../shared/api'
 
 declare global {
   interface Window {
-    api?: Api // set by the preload script
+    api?: Api // set by the preload script; absent in a browser (the web UI)
   }
 }
 

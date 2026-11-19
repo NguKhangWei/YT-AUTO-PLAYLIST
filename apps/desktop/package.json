@@ -11,7 +11,9 @@
     "build": "electron-vite build",
     "preview": "node scripts/electron-vite.mjs preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "build:win": "electron-vite build && electron-builder --win --config electron-builder.yml"
+    "build:win": "electron-vite build && electron-builder --win --config electron-builder.yml",
+    "build:server": "node -e \"require('fs').rmSync('out-server',{recursive:true,force:true})\" && vite build -c vite.web.config.mts && vite build -c vite.server.config.mts",
+    "serve:local": "node --env-file-if-exists=../../.env out-server/server.mjs --local"
   },
   "devDependencies": {
     "@radix-ui/react-dialog": "^1.3.1",

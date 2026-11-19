@@ -6,3 +6,5 @@ coverage
 package-lock.json
 PLAN.md
 PROGRESS.md
+out-server
+.local-server

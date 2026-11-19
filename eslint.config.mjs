@@ -6,7 +6,16 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/out/**', '**/dist/**', '**/release/**', '**/coverage/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/out/**',
+      '**/dist/**',
+      '**/release/**',
+      '**/coverage/**',
+      '**/out-server/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -22,9 +31,10 @@ export default tseslint.config(
     files: [
       'apps/desktop/src/main/**',
       'apps/desktop/src/preload/**',
+      'apps/desktop/src/server/**',
       'apps/desktop/scripts/**',
       '*.config.{js,mjs,ts}',
-      'apps/desktop/*.config.ts',
+      'apps/desktop/*.config.{ts,mts}',
     ],
     languageOptions: { globals: globals.node },
   },

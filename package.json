@@ -19,7 +19,9 @@
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
     "build:win": "npm run build:win -w @auto-yt/desktop",
-    "debug:lookback": "node apps/desktop/scripts/debug-lookback.mjs"
+    "debug:lookback": "node apps/desktop/scripts/debug-lookback.mjs",
+    "build:server": "npm run build:server -w @auto-yt/desktop",
+    "serve:local": "npm run build:server && npm run serve:local -w @auto-yt/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

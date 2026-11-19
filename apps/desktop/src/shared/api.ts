@@ -88,5 +88,5 @@ export interface Api {
   }
 }
 
-/** How main answers every IPC call (Electron would otherwise prefix error messages). */
+/** How main answers every call, over IPC or HTTP (Electron would otherwise prefix error messages). */
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }

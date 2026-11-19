@@ -9,6 +9,8 @@ node_modules/
 out/
 dist/
 release/
+out-server/
+.local-server/
 *.tsbuildinfo
 .vite/
 
