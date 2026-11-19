@@ -28,6 +28,8 @@ coverage/
 *.db-wal
 *.db-shm
 tokens.bin
+auth.json
+*-auth.json
 
 # Logs
 *.log

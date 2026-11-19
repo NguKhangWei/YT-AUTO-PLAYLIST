@@ -15,6 +15,7 @@ import { createNtfyNotifier } from '../main/ntfy'
 import { createRunner } from '../main/runner'
 import { createSchedulerLoop } from '../main/scheduler-loop'
 import { createSchedulerService } from '../main/schedulers'
+import { createBackups } from './backups'
 import type { ServerConfig } from './config'
 import { createWebServer } from './http'
 
@@ -87,12 +88,15 @@ export async function serve(config: ServerConfig, webDir: string) {
 
   const port = await web.listen(config.port)
   loop.start() // checks right away, so scans missed while the server was down run now
+  const backups = createBackups({ db, dir: join(config.dataDir, 'backups'), now, log })
+  backups.start()
 
   return {
     port,
     db,
     loop,
     async stop() {
+      backups.stop()
       loop.stop()
       await web.close()
       db.close()
